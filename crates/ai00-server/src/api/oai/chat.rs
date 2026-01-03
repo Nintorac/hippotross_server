@@ -18,15 +18,15 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[salvo(schema(rename_all = "lowercase"))]
 enum Role {
     #[default]
-    #[serde(alias = "system")]
     System,
-    #[serde(alias = "user")]
     User,
-    #[serde(alias = "assistant")]
     Assistant,
-    #[serde(alias = "observation", alias = "tool", alias = "Tool")]
+    #[serde(rename = "tool")]
+    #[salvo(schema(rename = "tool"))]
     Observation,
 }
 
@@ -41,10 +41,62 @@ impl std::fmt::Display for Role {
     }
 }
 
+// OpenAI content can be a string or array of content parts
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+enum Content {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+impl Default for Content {
+    fn default() -> Self {
+        Content::Text(String::new())
+    }
+}
+
+impl From<String> for Content {
+    fn from(s: String) -> Self {
+        Content::Text(s)
+    }
+}
+
+impl From<&str> for Content {
+    fn from(s: &str) -> Self {
+        Content::Text(s.to_string())
+    }
+}
+
+impl Content {
+    fn to_string(&self) -> String {
+        match self {
+            Content::Text(s) => s.clone(),
+            Content::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| {
+                    if p.r#type == "text" {
+                        p.text.clone()
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema)]
+struct ContentPart {
+    r#type: String,
+    #[serde(default)]
+    text: Option<String>,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize, ToSchema)]
 struct ChatRecord {
     role: Role,
-    content: String,
+    content: Content,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -130,6 +182,17 @@ struct ChatRequest {
     top_k: usize,
     #[derivative(Default(value = "1.0"))]
     temperature: f32,
+    // OpenAI compatibility - ignore these fields
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    frequency_penalty: Option<f32>,
+    #[serde(default)]
+    presence_penalty: Option<f32>,
+    #[serde(default)]
+    n: Option<usize>,
+    #[serde(default)]
+    user: Option<String>,
 }
 
 impl From<ChatRequest> for GenerateRequest {
@@ -156,7 +219,8 @@ impl From<ChatRequest> for GenerateRequest {
             .into_iter()
             .map(|ChatRecord { role, content }| {
                 let role = names.get(&role).cloned().unwrap_or(role.to_string());
-                let content = re.replace_all(&content, "\n");
+                let content_str = content.to_string();
+                let content = re.replace_all(&content_str, "\n");
                 let content = content.trim();
                 template
                     .record
@@ -167,7 +231,7 @@ impl From<ChatRequest> for GenerateRequest {
         let model_text = Vec::from(messages)
             .into_iter()
             .filter(|record| record.role == Role::Assistant)
-            .map(|record| record.content)
+            .map(|record| record.content.to_string())
             .join(&sep);
 
         let assistant = names
