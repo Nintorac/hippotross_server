@@ -23,6 +23,7 @@ use salvo::{
 use tokio::{
     fs::File,
     io::{AsyncReadExt, BufReader},
+    signal,
 };
 
 use crate::types::JwtClaims;
@@ -140,6 +141,26 @@ pub struct Args {
     ip: Option<IpAddr>,
     #[arg(long, short)]
     port: Option<u16>,
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = signal::ctrl_c();
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => log::info!("received Ctrl+C, shutting down..."),
+        _ = terminate => log::info!("received SIGTERM, shutting down..."),
+    }
 }
 
 #[tokio::main]
@@ -348,6 +369,24 @@ async fn main() {
     };
     log::info!("open frontend at {url}");
 
+    // Helper macro to run server with graceful shutdown
+    macro_rules! serve_graceful {
+        ($acceptor:expr, $service:expr) => {{
+            let server = salvo::server::Server::new($acceptor);
+            let handle = server.handle();
+
+            // Spawn task that waits for shutdown signal, then tells server to stop
+            tokio::spawn(async move {
+                shutdown_signal().await;
+                handle.stop_graceful(Some(Duration::from_secs(5)));
+            });
+
+            // serve() completes when stop_graceful() is called
+            server.serve($service).await;
+            log::info!("server shutdown complete");
+        }};
+    }
+
     if acme {
         let listener = TcpListener::new(ipv4_addr)
             .acme()
@@ -366,11 +405,11 @@ async fn main() {
             #[cfg(target_os = "windows")]
             let acceptor = listener.join(ipv6_listener).bind().await;
             log::info!("server started at {ipv6_addr} with acme and tls");
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         } else {
             let acceptor = listener.bind().await;
             log::info!("server started at {ipv4_addr} with acme and tls.");
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         };
     } else if tls {
         let config = RustlsConfig::new(
@@ -397,14 +436,14 @@ async fn main() {
                 .bind()
                 .await;
             log::info!("server started at {ipv6_addr} with tls");
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         } else {
             let acceptor = QuinnListener::new(config.clone(), ipv4_addr)
                 .join(listener)
                 .bind()
                 .await;
             log::info!("server started at {ipv4_addr} with tls");
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         };
     } else if let Some(ipv6_addr) = ipv6_addr {
         let ipv6_addr = SocketAddr::new(IpAddr::V6(ipv6_addr), port);
@@ -414,19 +453,22 @@ async fn main() {
         #[cfg(not(target_os = "windows"))]
         if ipv6_addr.ip().is_unspecified() {
             let acceptor = ipv6_listener.bind().await;
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         } else {
             let acceptor = TcpListener::new(ipv4_addr).join(ipv6_listener).bind().await;
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         };
         #[cfg(target_os = "windows")]
         {
             let acceptor = TcpListener::new(ipv4_addr).join(ipv6_listener).bind().await;
-            salvo::server::Server::new(acceptor).serve(service).await;
+            serve_graceful!(acceptor, service);
         }
     } else {
         log::info!("server started at {ipv4_addr} without tls");
         let acceptor = TcpListener::new(ipv4_addr).bind().await;
-        salvo::server::Server::new(acceptor).serve(service).await;
+        serve_graceful!(acceptor, service);
     };
+
+    log::info!("waiting for background tasks to complete...");
+    tokio::time::sleep(Duration::from_millis(500)).await;
 }
