@@ -3,8 +3,20 @@
 //! These types match the Anthropic Messages API format for compatibility
 //! with Claude API clients (e.g., LibreChat with `defaultParamsEndpoint: 'anthropic'`).
 
+use lazy_static::lazy_static;
+use regex::Regex;
 use salvo::oapi::ToSchema;
 use serde::{Deserialize, Serialize};
+
+lazy_static! {
+    /// Regex for validating tool names: 1-64 chars, alphanumeric plus underscore/hyphen.
+    static ref TOOL_NAME_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9_-]{1,64}$").unwrap();
+}
+
+/// Validate that a tool name matches the required pattern.
+pub fn validate_tool_name(name: &str) -> bool {
+    TOOL_NAME_REGEX.is_match(name)
+}
 
 /// Message role - only "user" or "assistant" allowed.
 /// Note: Claude API does NOT support "system" role in messages array.
@@ -176,6 +188,92 @@ impl From<ai00_core::TokenCounter> for Usage {
     }
 }
 
+/// Tool definition for function calling.
+///
+/// Matches Claude API tool schema for compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Tool {
+    /// Tool name (must match ^[a-zA-Z0-9_-]{1,64}$)
+    pub name: String,
+
+    /// Human-readable description of what the tool does
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// JSON Schema for the tool's input parameters
+    pub input_schema: serde_json::Value,
+
+    /// Cache control settings (forward compatibility - ignored)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<serde_json::Value>,
+}
+
+impl Tool {
+    /// Validate the tool definition.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !validate_tool_name(&self.name) {
+            return Err("Tool name must be 1-64 alphanumeric characters, underscores, or hyphens");
+        }
+        if self.input_schema.is_null() {
+            return Err("Tool input_schema is required");
+        }
+        Ok(())
+    }
+}
+
+/// How the model should choose which tool to use.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    /// Simple string choice: "auto", "none", or "any"
+    Simple(ToolChoiceSimple),
+    /// Specific tool choice
+    Specific(ToolChoiceSpecific),
+}
+
+impl Default for ToolChoice {
+    fn default() -> Self {
+        ToolChoice::Simple(ToolChoiceSimple::Auto)
+    }
+}
+
+/// Simple tool choice values.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolChoiceSimple {
+    /// Model automatically decides whether to use tools
+    #[default]
+    Auto,
+    /// Model will not use any tools
+    None,
+    /// Model must use one of the provided tools
+    Any,
+}
+
+/// Specific tool choice - forces the model to use a particular tool.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ToolChoiceSpecific {
+    /// Always "tool" for specific tool choice
+    #[serde(rename = "type")]
+    pub choice_type: String,
+    /// Name of the tool to use
+    pub name: String,
+    /// Whether to disable parallel tool use (forward compatibility)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_parallel_tool_use: Option<bool>,
+}
+
+impl ToolChoiceSpecific {
+    /// Create a new specific tool choice.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            choice_type: "tool".to_string(),
+            name: name.into(),
+            disable_parallel_tool_use: None,
+        }
+    }
+}
+
 /// Messages API request.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MessagesRequest {
@@ -211,6 +309,18 @@ pub struct MessagesRequest {
     /// Top-k sampling
     #[serde(default)]
     pub top_k: Option<usize>,
+
+    /// Tools available for the model to use
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+
+    /// How the model should choose which tool to use
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+
+    /// Metadata for request tracking (forward compatibility - ignored)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Messages API response.
