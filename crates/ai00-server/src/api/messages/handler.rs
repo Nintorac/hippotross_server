@@ -13,8 +13,8 @@ use super::thinking_extractor::{
 };
 use super::tool_parser::ToolParser;
 use super::types::{
-    generate_tool_system_prompt, ContentBlock, MessageParam, MessageRole, MessagesRequest,
-    MessagesResponse, StopReason, ThinkingConfig, Tool,
+    generate_tool_system_prompt, BnfValidationLevel, ContentBlock, MessageParam, MessageRole,
+    MessagesRequest, MessagesResponse, StopReason, ThinkingConfig, Tool,
 };
 use crate::{
     api::{error::ApiErrorResponse, request_info},
@@ -113,6 +113,56 @@ fn get_thinking_suffix(thinking: Option<&ThinkingConfig>) -> &'static str {
     }
 }
 
+/// Determine the effective BNF validation level and schema.
+///
+/// Logic:
+/// 1. If `bnf_validation` is explicitly set, use that level
+/// 2. If `bnf_validation` is None and tools/thinking present, auto-enable Structural
+/// 3. If raw `bnf_schema` is provided, use that (only when validation is None)
+///
+/// Returns (effective_level, schema_to_use).
+/// Note: Grammar generation for Structural/SchemaAware is implemented in ninchat-upf.2-5.
+fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<String>) {
+    let has_tools = req.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    let has_thinking = req
+        .thinking
+        .as_ref()
+        .map(|t| t.is_enabled())
+        .unwrap_or(false);
+
+    // Determine effective validation level
+    let effective_level = match req.bnf_validation {
+        // Explicitly set - use that
+        Some(level) => level,
+        // Not set - auto-enable Structural if tools/thinking present
+        None => {
+            if has_tools || has_thinking {
+                // TODO: Auto-enable once grammar generators are implemented (ninchat-upf.2-5)
+                // For now, fall back to None to maintain current behavior
+                // BnfValidationLevel::Structural
+                BnfValidationLevel::None
+            } else {
+                BnfValidationLevel::None
+            }
+        }
+    };
+
+    // Determine schema to use
+    let schema = match effective_level {
+        BnfValidationLevel::None => {
+            // Use raw bnf_schema if provided
+            req.bnf_schema.clone()
+        }
+        BnfValidationLevel::Structural | BnfValidationLevel::SchemaAware => {
+            // TODO: Generate grammar based on level (ninchat-upf.2-5)
+            // For now, fall back to raw bnf_schema if provided
+            req.bnf_schema.clone()
+        }
+    };
+
+    (effective_level, schema)
+}
+
 /// Convert MessagesRequest to GenerateRequest.
 fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
     let prompt = build_prompt(
@@ -150,13 +200,16 @@ fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
         ..Default::default()
     })));
 
+    // Resolve BNF validation level and get effective schema
+    let (_effective_level, bnf_schema) = resolve_bnf_config(req);
+
     GenerateRequest {
         prompt,
         model_text,
         max_tokens,
         stop,
         sampler,
-        bnf_schema: req.bnf_schema.clone(),
+        bnf_schema,
         ..Default::default()
     }
 }
@@ -249,7 +302,7 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
         }
     }
 
-    // Validate bnf_schema if provided
+    // Validate bnf_schema if provided (raw grammar mode)
     if let Some(ref schema) = req.bnf_schema {
         if schema.trim().is_empty() {
             return Err(
@@ -258,14 +311,44 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
             );
         }
 
-        // BNF cannot be used with thinking mode (BNF constraints all tokens including thinking)
+        // Raw BNF cannot be used with thinking mode (BNF constraints all tokens including thinking)
+        // Note: bnf_validation with Structural/SchemaAware WILL support thinking once
+        // grammar generators are implemented (ninchat-upf.2-5)
         if req.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false) {
-            return Err(
-                ApiErrorResponse::invalid_request(
-                    "bnf_schema cannot be used with extended thinking enabled",
-                )
-                .with_param("bnf_schema"),
-            );
+            // Only error if bnf_validation is not set (raw bnf_schema mode)
+            // or if bnf_validation is None (explicitly disabled)
+            match req.bnf_validation {
+                None | Some(BnfValidationLevel::None) => {
+                    return Err(
+                        ApiErrorResponse::invalid_request(
+                            "bnf_schema cannot be used with extended thinking enabled. \
+                             Use bnf_validation: 'structural' instead for thinking-aware constraints.",
+                        )
+                        .with_param("bnf_schema"),
+                    );
+                }
+                // Structural/SchemaAware will handle thinking once implemented
+                Some(BnfValidationLevel::Structural) | Some(BnfValidationLevel::SchemaAware) => {}
+            }
+        }
+    }
+
+    // Validate bnf_validation if provided
+    if let Some(ref level) = req.bnf_validation {
+        if level.is_enabled() {
+            // Structural/SchemaAware require tools or thinking to be useful
+            // (otherwise there's nothing to constrain structurally)
+            let has_tools = req.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+            let has_thinking = req
+                .thinking
+                .as_ref()
+                .map(|t| t.is_enabled())
+                .unwrap_or(false);
+
+            if !has_tools && !has_thinking && req.bnf_schema.is_none() {
+                // Warn but don't error - user might know what they're doing
+                // In the future, SchemaAware could be used for JSON mode without tools
+            }
         }
     }
 
