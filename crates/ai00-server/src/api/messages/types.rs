@@ -395,6 +395,36 @@ impl ThinkingConfig {
     }
 }
 
+/// BNF validation level for structured output.
+///
+/// Controls how strictly the model output is constrained to follow
+/// grammar rules for tool calls and thinking tags.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BnfValidationLevel {
+    /// No BNF constraints applied.
+    /// Use this to disable auto-enabled validation.
+    #[default]
+    None,
+
+    /// Stage 1: Structural validation only.
+    /// Enforces correct tag syntax (tool_use, think) and valid JSON structure,
+    /// but does not validate against specific tool schemas.
+    Structural,
+
+    /// Stage 2: Full schema validation.
+    /// Enforces tool names match defined tools and inputs match their JSON schemas.
+    /// More restrictive but ensures well-formed tool calls.
+    SchemaAware,
+}
+
+impl BnfValidationLevel {
+    /// Check if validation is enabled (not None).
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, BnfValidationLevel::None)
+    }
+}
+
 /// How the model should choose which tool to use.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
@@ -500,12 +530,27 @@ pub struct MessagesRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 
-    /// BNF grammar schema for constrained generation.
+    /// BNF grammar schema for constrained generation (raw grammar).
     /// When provided, the model output will be constrained to match this grammar.
     /// Uses KBNF format (see json2kbnf.py for generating from JSON schemas).
     /// Note: Cannot be used with extended thinking enabled.
+    /// Prefer using `bnf_validation` for automatic grammar generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bnf_schema: Option<String>,
+
+    /// BNF validation level for automatic grammar generation.
+    ///
+    /// When set to `structural` or `schema_aware`, the server automatically
+    /// generates appropriate grammars based on enabled features (tools, thinking).
+    ///
+    /// - `none`: No automatic grammar (use raw `bnf_schema` if provided)
+    /// - `structural`: Enforce correct tag/JSON syntax
+    /// - `schema_aware`: Additionally validate tool names and input schemas
+    ///
+    /// When not specified and tools/thinking are present, defaults to `structural`.
+    /// Set explicitly to `none` to disable auto-generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bnf_validation: Option<BnfValidationLevel>,
 }
 
 /// Messages API response.

@@ -996,6 +996,7 @@ fn test_bnf_schema_serialization() {
         thinking: None,
         metadata: None,
         bnf_schema: Some("start ::= \"hello\"".into()),
+        bnf_validation: None,
     };
     let json = serde_json::to_value(&request).unwrap();
     assert_eq!(json["bnf_schema"], "start ::= \"hello\"");
@@ -1034,6 +1035,7 @@ fn test_bnf_schema_skips_serialization_when_none() {
         thinking: None,
         metadata: None,
         bnf_schema: None,
+        bnf_validation: None,
     };
     let json = serde_json::to_value(&request).unwrap();
     assert!(json.get("bnf_schema").is_none());
@@ -1059,4 +1061,145 @@ number ::= [0-9]+"#;
 
     let request: MessagesRequest = serde_json::from_value(json).unwrap();
     assert_eq!(request.bnf_schema.as_deref(), Some(grammar));
+}
+
+// =============================================================================
+// BNF Validation Level Tests
+// =============================================================================
+
+use ai00_server::api::messages::BnfValidationLevel;
+
+/// Test BnfValidationLevel enum serialization.
+#[rstest]
+#[case(BnfValidationLevel::None, "none")]
+#[case(BnfValidationLevel::Structural, "structural")]
+#[case(BnfValidationLevel::SchemaAware, "schema_aware")]
+fn test_bnf_validation_level_serialization(
+    #[case] level: BnfValidationLevel,
+    #[case] expected: &str,
+) {
+    let json = serde_json::to_value(&level).unwrap();
+    assert_eq!(json, expected);
+}
+
+/// Test BnfValidationLevel enum deserialization.
+#[rstest]
+#[case("none", BnfValidationLevel::None)]
+#[case("structural", BnfValidationLevel::Structural)]
+#[case("schema_aware", BnfValidationLevel::SchemaAware)]
+fn test_bnf_validation_level_deserialization(
+    #[case] input: &str,
+    #[case] expected: BnfValidationLevel,
+) {
+    let level: BnfValidationLevel = serde_json::from_value(json!(input)).unwrap();
+    assert_eq!(level, expected);
+}
+
+/// Test BnfValidationLevel is_enabled method.
+#[test]
+fn test_bnf_validation_level_is_enabled() {
+    assert!(!BnfValidationLevel::None.is_enabled());
+    assert!(BnfValidationLevel::Structural.is_enabled());
+    assert!(BnfValidationLevel::SchemaAware.is_enabled());
+}
+
+/// Test BnfValidationLevel default is None.
+#[test]
+fn test_bnf_validation_level_default() {
+    let level = BnfValidationLevel::default();
+    assert_eq!(level, BnfValidationLevel::None);
+}
+
+/// Test bnf_validation parameter in request serialization.
+#[test]
+fn test_bnf_validation_request_serialization() {
+    let request = MessagesRequest {
+        model: "test".into(),
+        messages: vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Hello".into()),
+        }],
+        system: None,
+        max_tokens: 100,
+        stream: false,
+        stop_sequences: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        metadata: None,
+        bnf_schema: None,
+        bnf_validation: Some(BnfValidationLevel::Structural),
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["bnf_validation"], "structural");
+}
+
+/// Test bnf_validation parameter deserialization.
+#[test]
+fn test_bnf_validation_request_deserialization() {
+    let json = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 100,
+        "bnf_validation": "schema_aware"
+    });
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(request.bnf_validation, Some(BnfValidationLevel::SchemaAware));
+}
+
+/// Test bnf_validation is optional (None when not provided).
+#[test]
+fn test_bnf_validation_optional() {
+    let json = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 100
+    });
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert!(request.bnf_validation.is_none());
+}
+
+/// Test bnf_validation is not serialized when None.
+#[test]
+fn test_bnf_validation_skips_serialization_when_none() {
+    let request = MessagesRequest {
+        model: "test".into(),
+        messages: vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Hello".into()),
+        }],
+        system: None,
+        max_tokens: 100,
+        stream: false,
+        stop_sequences: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        metadata: None,
+        bnf_schema: None,
+        bnf_validation: None,
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert!(json.get("bnf_validation").is_none());
+}
+
+/// Test both bnf_schema and bnf_validation can be set.
+#[test]
+fn test_bnf_schema_and_validation_together() {
+    let json = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 100,
+        "bnf_schema": "start ::= \"hello\"",
+        "bnf_validation": "structural"
+    });
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(request.bnf_schema.as_deref(), Some("start ::= \"hello\""));
+    assert_eq!(request.bnf_validation, Some(BnfValidationLevel::Structural));
 }
