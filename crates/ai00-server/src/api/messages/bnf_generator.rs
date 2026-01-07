@@ -6,6 +6,8 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
+use super::types::Tool;
+
 /// Context for generating unique rule names during recursive schema conversion.
 #[derive(Debug, Default)]
 pub struct GeneratorContext {
@@ -244,6 +246,115 @@ pub fn schema_to_grammar(schema: &Value, start_rule: &str) -> String {
     grammar
 }
 
+/// Generate tool name alternatives from tool definitions.
+///
+/// Creates a grammar rule that matches any of the provided tool names.
+///
+/// # Example
+/// ```text
+/// Input: [Tool{name: "get_weather"}, Tool{name: "search"}]
+/// Output: tool_name ::= "get_weather" | "search";
+/// ```
+pub fn generate_tool_name_grammar(tools: &[Tool]) -> String {
+    if tools.is_empty() {
+        return String::new();
+    }
+
+    let names: Vec<String> = tools
+        .iter()
+        .map(|t| format!("\"{}\"", t.name))
+        .collect();
+
+    format!("tool_name ::= {};", names.join(" | "))
+}
+
+/// Generate input grammar for each tool based on its input_schema.
+///
+/// Creates per-tool rules for:
+/// 1. Tool call structure: `{tool_name}_call` - matches `{"name": "tool_name", "input": ...}`
+/// 2. Tool input schema: `{tool_name}_input` - matches the tool's input JSON Schema
+/// 3. Dispatch rule: `tool_call` - alternation of all tool call rules
+///
+/// # Returns
+/// A tuple of (grammar_rules, context) where grammar_rules is the string of all rules
+/// and context contains the accumulated state for potential further use.
+pub fn generate_tool_grammars(tools: &[Tool]) -> String {
+    if tools.is_empty() {
+        return String::new();
+    }
+
+    let mut ctx = GeneratorContext::new();
+    let mut tool_calls = Vec::new();
+
+    for tool in tools {
+        let call_rule = format!("{}_call", tool.name);
+        let input_rule = format!("{}_input", tool.name);
+
+        // Generate input schema rule using json_schema_to_kbnf
+        json_schema_to_kbnf(&tool.input_schema, &input_rule, &mut ctx);
+
+        // Tool call rule: {"name": "tool_name", "input": ...}
+        ctx.add_rule(format!(
+            r#"{} ::= "{{" ws "\"name\"" ws ":" ws "\"{}\"" ws "," ws "\"input\"" ws ":" ws {} ws "}}";"#,
+            call_rule, tool.name, input_rule
+        ));
+
+        tool_calls.push(call_rule);
+    }
+
+    // Dispatch rule - alternation of all tool calls
+    ctx.add_rule(format!("tool_call ::= {};", tool_calls.join(" | ")));
+
+    ctx.into_grammar()
+}
+
+/// Generate a complete schema-aware grammar for tools.
+///
+/// Combines:
+/// - JSON primitives from Stage 1
+/// - Tool structure rules (text_or_tools, tool_sequence, etc.)
+/// - Per-tool call and input rules
+/// - Optional thinking block support
+pub fn generate_schema_aware_grammar(tools: &[Tool], thinking_enabled: bool) -> String {
+    use super::bnf_grammars::GRAMMAR_JSON_PRIMITIVES;
+
+    let mut grammar = String::new();
+
+    // Base JSON primitives
+    grammar.push_str(GRAMMAR_JSON_PRIMITIVES);
+    grammar.push('\n');
+
+    // Text and tool structure rules
+    if thinking_enabled {
+        grammar.push_str(r#"
+start ::= [thinking_block] text_or_tools;
+thinking_block ::= "<think>" thinking_content "</think>" ws;
+thinking_content ::= #"[^<]*(?:<(?!/think>)[^<]*)*";
+"#);
+    } else {
+        grammar.push_str("start ::= text_or_tools;\n");
+    }
+
+    grammar.push_str(r#"
+text_or_tools ::= [text] [tool_sequence];
+tool_sequence ::= tool_use [text] [tool_sequence];
+tool_use ::= "<tool_use>" ws tool_call ws "</tool_use>";
+"#);
+
+    // Text pattern depends on whether thinking is enabled
+    if thinking_enabled {
+        grammar.push_str(r#"text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>|think>|/think>)[^<]*)*";"#);
+    } else {
+        grammar.push_str(r#"text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>)[^<]*)*";"#);
+    }
+    grammar.push('\n');
+
+    // Tool-specific rules
+    grammar.push_str(&generate_tool_grammars(tools));
+
+    grammar
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,5 +590,227 @@ mod tests {
         // Enum field
         assert!(grammar.contains(r#"\"celsius\""#));
         assert!(grammar.contains(r#"\"fahrenheit\""#));
+    }
+
+    // --- Tool Grammar Generation Tests ---
+
+    fn make_tool(name: &str, schema: Value) -> Tool {
+        Tool {
+            name: name.to_string(),
+            description: Some(format!("Test tool: {}", name)),
+            input_schema: schema,
+            cache_control: None,
+        }
+    }
+
+    #[test]
+    fn test_generate_tool_name_grammar_empty() {
+        let grammar = generate_tool_name_grammar(&[]);
+        assert!(grammar.is_empty());
+    }
+
+    #[test]
+    fn test_generate_tool_name_grammar_single() {
+        let tools = vec![make_tool("get_weather", json!({"type": "object"}))];
+        let grammar = generate_tool_name_grammar(&tools);
+        assert_eq!(grammar, r#"tool_name ::= "get_weather";"#);
+    }
+
+    #[test]
+    fn test_generate_tool_name_grammar_multiple() {
+        let tools = vec![
+            make_tool("get_weather", json!({"type": "object"})),
+            make_tool("search", json!({"type": "object"})),
+            make_tool("calculate", json!({"type": "object"})),
+        ];
+        let grammar = generate_tool_name_grammar(&tools);
+        assert!(grammar.contains("tool_name ::="));
+        assert!(grammar.contains(r#""get_weather""#));
+        assert!(grammar.contains(r#""search""#));
+        assert!(grammar.contains(r#""calculate""#));
+        assert!(grammar.contains(" | "));
+    }
+
+    #[test]
+    fn test_generate_tool_grammars_empty() {
+        let grammar = generate_tool_grammars(&[]);
+        assert!(grammar.is_empty());
+    }
+
+    #[test]
+    fn test_generate_tool_grammars_single() {
+        let tools = vec![make_tool(
+            "get_weather",
+            json!({
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"}
+                },
+                "required": ["location"]
+            }),
+        )];
+        let grammar = generate_tool_grammars(&tools);
+
+        // Should have tool call rule
+        assert!(grammar.contains("get_weather_call ::="));
+        // Should reference input rule
+        assert!(grammar.contains("get_weather_input"));
+        // Should have dispatch rule
+        assert!(grammar.contains("tool_call ::= get_weather_call;"));
+        // Should have location property
+        assert!(grammar.contains(r#"\"location\""#));
+    }
+
+    #[test]
+    fn test_generate_tool_grammars_multiple() {
+        let tools = vec![
+            make_tool(
+                "get_weather",
+                json!({
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"]
+                }),
+            ),
+            make_tool(
+                "search",
+                json!({
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
+                }),
+            ),
+        ];
+        let grammar = generate_tool_grammars(&tools);
+
+        // Both tools should have call rules
+        assert!(grammar.contains("get_weather_call ::="));
+        assert!(grammar.contains("search_call ::="));
+
+        // Dispatch rule should have alternation
+        assert!(grammar.contains("tool_call ::="));
+        assert!(grammar.contains("get_weather_call"));
+        assert!(grammar.contains("search_call"));
+        assert!(grammar.contains(" | "));
+    }
+
+    #[test]
+    fn test_generate_tool_grammars_with_enum() {
+        let tools = vec![make_tool(
+            "get_weather",
+            json!({
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"},
+                    "units": {
+                        "type": "string",
+                        "enum": ["celsius", "fahrenheit"]
+                    }
+                },
+                "required": ["location"]
+            }),
+        )];
+        let grammar = generate_tool_grammars(&tools);
+
+        // Should have enum values
+        assert!(grammar.contains(r#"\"celsius\""#));
+        assert!(grammar.contains(r#"\"fahrenheit\""#));
+    }
+
+    #[test]
+    fn test_generate_schema_aware_grammar_no_thinking() {
+        let tools = vec![make_tool(
+            "search",
+            json!({
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"]
+            }),
+        )];
+        let grammar = generate_schema_aware_grammar(&tools, false);
+
+        // Should have base primitives
+        assert!(grammar.contains("json_object ::="));
+
+        // Should have start rule without thinking
+        assert!(grammar.contains("start ::= text_or_tools;"));
+
+        // Should NOT have thinking block
+        assert!(!grammar.contains("thinking_block"));
+
+        // Should have tool structure
+        assert!(grammar.contains("tool_use ::="));
+        assert!(grammar.contains("tool_call"));
+    }
+
+    #[test]
+    fn test_generate_schema_aware_grammar_with_thinking() {
+        let tools = vec![make_tool(
+            "search",
+            json!({
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"]
+            }),
+        )];
+        let grammar = generate_schema_aware_grammar(&tools, true);
+
+        // Should have thinking block
+        assert!(grammar.contains("thinking_block"));
+        assert!(grammar.contains("<think>"));
+        assert!(grammar.contains("</think>"));
+
+        // Start rule should include thinking
+        assert!(grammar.contains("[thinking_block]"));
+
+        // Text pattern should exclude thinking tags
+        assert!(grammar.contains("think>"));
+    }
+
+    #[test]
+    fn test_generate_schema_aware_grammar_complete_example() {
+        // Replicate the example from spec 8.4.4
+        let tools = vec![
+            make_tool(
+                "get_weather",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"},
+                        "units": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"]
+                        }
+                    },
+                    "required": ["location"]
+                }),
+            ),
+            make_tool(
+                "search",
+                json!({
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
+                }),
+            ),
+        ];
+        let grammar = generate_schema_aware_grammar(&tools, false);
+
+        // All expected components
+        assert!(grammar.contains("start ::="));
+        assert!(grammar.contains("text_or_tools"));
+        assert!(grammar.contains("tool_sequence"));
+        assert!(grammar.contains("tool_use"));
+        assert!(grammar.contains("<tool_use>"));
+        assert!(grammar.contains("</tool_use>"));
+
+        // Tool dispatch
+        assert!(grammar.contains("tool_call ::="));
+        assert!(grammar.contains("get_weather_call"));
+        assert!(grammar.contains("search_call"));
+
+        // Tool-specific rules
+        assert!(grammar.contains("get_weather_input"));
+        assert!(grammar.contains("search_input"));
     }
 }
