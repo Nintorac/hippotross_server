@@ -273,6 +273,7 @@ async fn main() {
     let app = Router::new()
         //.hoop(CorsLayer::permissive())
         .hoop(Logger::new())
+        .hoop(api::request_id::request_id_handler)
         .hoop(
             affix_state::inject(sender)
                 .inject(config.clone())
