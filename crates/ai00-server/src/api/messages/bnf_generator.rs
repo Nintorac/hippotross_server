@@ -95,7 +95,7 @@ pub fn json_schema_to_kbnf(schema: &Value, rule_name: &str, ctx: &mut GeneratorC
 fn handle_any_of(variants: &[Value], rule_name: &str, ctx: &mut GeneratorContext) -> String {
     let mut variant_rules = Vec::new();
 
-    for (i, variant) in variants.iter().enumerate() {
+    for variant in variants.iter() {
         let variant_name = ctx.unique_rule(&format!("{}_var", rule_name));
         json_schema_to_kbnf(variant, &variant_name, ctx);
         variant_rules.push(variant_name);
@@ -378,8 +378,8 @@ pub fn generate_bnf_schema(
     validation_level: super::types::BnfValidationLevel,
 ) -> Option<String> {
     use super::bnf_grammars::{
-        build_structural_grammar, GRAMMAR_JSON_PRIMITIVES, GRAMMAR_THINKING_ONLY,
-        GRAMMAR_THINKING_PLUS_TOOLS, GRAMMAR_TOOLS_ONLY,
+        GRAMMAR_JSON_PRIMITIVES, GRAMMAR_THINKING_ONLY, GRAMMAR_THINKING_PLUS_TOOLS,
+        GRAMMAR_TOOLS_ONLY,
     };
     use super::types::BnfValidationLevel;
 
