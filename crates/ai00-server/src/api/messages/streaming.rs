@@ -198,6 +198,45 @@ pub fn emit_input_json_delta(index: usize, partial_json: String) -> SseEvent {
         .text(serde_json::to_string(&event).unwrap())
 }
 
+/// Create a content_block_start SSE event for thinking.
+pub fn emit_content_block_start_thinking(index: usize) -> SseEvent {
+    let event = ContentBlockStartEvent {
+        event_type: "content_block_start",
+        index,
+        content_block: ContentBlock::Thinking {
+            thinking: String::new(),
+            signature: String::new(),
+        },
+    };
+    SseEvent::default()
+        .name("content_block_start")
+        .text(serde_json::to_string(&event).unwrap())
+}
+
+/// Create a content_block_delta SSE event for thinking.
+pub fn emit_thinking_delta(index: usize, thinking: String) -> SseEvent {
+    let event = ContentBlockDeltaEvent {
+        event_type: "content_block_delta",
+        index,
+        delta: ContentDelta::ThinkingDelta { thinking },
+    };
+    SseEvent::default()
+        .name("content_block_delta")
+        .text(serde_json::to_string(&event).unwrap())
+}
+
+/// Create a content_block_delta SSE event for thinking signature.
+pub fn emit_signature_delta(index: usize, signature: String) -> SseEvent {
+    let event = ContentBlockDeltaEvent {
+        event_type: "content_block_delta",
+        index,
+        delta: ContentDelta::SignatureDelta { signature },
+    };
+    SseEvent::default()
+        .name("content_block_delta")
+        .text(serde_json::to_string(&event).unwrap())
+}
+
 /// Create a content_block_stop SSE event.
 pub fn emit_content_block_stop(index: usize) -> SseEvent {
     let event = ContentBlockStopEvent {

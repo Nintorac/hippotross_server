@@ -10,6 +10,9 @@ mod tool_parser;
 mod types;
 
 pub use handler::messages_handler;
-pub use thinking_extractor::{generate_thinking_signature, ThinkingExtractor, ThinkingResult};
+pub use thinking_extractor::{
+    generate_thinking_signature, ThinkingExtractor, ThinkingResult, ThinkingStreamParser,
+    ThinkingStreamResult, ThinkingStreamState,
+};
 pub use tool_parser::{ParseResult, ParsedToolUse, ToolParser};
 pub use types::*;
