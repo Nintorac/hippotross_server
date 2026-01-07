@@ -1472,3 +1472,84 @@ fn test_integration_schema_aware_no_tools_fallback() {
     let result = generate_bnf_schema(None, false, BnfValidationLevel::SchemaAware);
     assert!(result.is_none());
 }
+
+// =============================================================================
+// User Grammar Wrapping Tests (ninchat-4pt)
+// =============================================================================
+
+use ai00_server::api::messages::bnf_grammars::wrap_grammar_with_thinking;
+
+/// Test wrap_grammar_with_thinking adds thinking block support.
+#[test]
+fn test_wrap_grammar_with_thinking_basic() {
+    let user_grammar = r#"start ::= greeting;
+greeting ::= "Hello" | "Hi";"#;
+
+    let wrapped = wrap_grammar_with_thinking(user_grammar);
+
+    // Should have new start rule with thinking block
+    assert!(wrapped.contains("start ::= [thinking_block] user_start"));
+    // User's start should be renamed to user_start
+    assert!(wrapped.contains("user_start ::= greeting"));
+    // User's other rules should be preserved
+    assert!(wrapped.contains("greeting ::="));
+    // Should have thinking block definitions
+    assert!(wrapped.contains("thinking_block"));
+    assert!(wrapped.contains("<think>"));
+    assert!(wrapped.contains("</think>"));
+}
+
+/// Test wrap_grammar_with_thinking preserves user's non-start rules.
+#[test]
+fn test_wrap_grammar_preserves_rules() {
+    let user_grammar = r#"start ::= json_response;
+json_response ::= "{" key_value "}";
+key_value ::= string ":" string;
+string ::= '"' content '"';
+content ::= #"[^\"]*";"#;
+
+    let wrapped = wrap_grammar_with_thinking(user_grammar);
+
+    // All user rules should be preserved
+    assert!(wrapped.contains("json_response ::="));
+    assert!(wrapped.contains("key_value ::="));
+    assert!(wrapped.contains("string ::="));
+    assert!(wrapped.contains("content ::="));
+}
+
+/// Test wrap_grammar_with_thinking with complex start rule.
+#[test]
+fn test_wrap_grammar_complex_start() {
+    let user_grammar = r#"start ::= text | json_object | list;
+text ::= #"[a-zA-Z ]+";
+json_object ::= "{" "}";
+list ::= "[" "]";"#;
+
+    let wrapped = wrap_grammar_with_thinking(user_grammar);
+
+    // Start rule should be renamed
+    assert!(wrapped.contains("user_start ::= text | json_object | list"));
+    // New start rule should reference user_start
+    assert!(wrapped.contains("[thinking_block] user_start"));
+}
+
+/// Test that bnf_schema + thinking no longer causes an error.
+#[test]
+fn test_bnf_schema_with_thinking_allowed() {
+    // This combination should now be accepted (grammar is wrapped automatically)
+    let json = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 100,
+        "bnf_schema": "start ::= \"hello\" | \"world\";",
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 1000
+        }
+    });
+
+    // Should deserialize without error
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert!(request.bnf_schema.is_some());
+    assert!(request.thinking.is_some());
+}

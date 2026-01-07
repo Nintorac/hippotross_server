@@ -8,6 +8,7 @@ use salvo::{oapi::extract::JsonBody, prelude::*, sse::SseEvent};
 use tokio::sync::RwLock;
 
 use super::bnf_generator::generate_bnf_schema;
+use super::bnf_grammars::wrap_grammar_with_thinking;
 use super::streaming::*;
 use super::thinking_extractor::{
     generate_thinking_signature, ThinkingExtractor, ThinkingStreamParser,
@@ -149,7 +150,18 @@ fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<Stri
     let schema = match effective_level {
         BnfValidationLevel::None => {
             // Use raw bnf_schema if provided
-            req.bnf_schema.clone()
+            // If thinking is enabled with raw schema, wrap it with thinking support
+            match (&req.bnf_schema, has_thinking) {
+                (Some(user_schema), true) => {
+                    // Wrap user's grammar to allow thinking block first
+                    Some(wrap_grammar_with_thinking(user_schema))
+                }
+                (Some(user_schema), false) => {
+                    // Use raw schema as-is
+                    Some(user_schema.clone())
+                }
+                (None, _) => None,
+            }
         }
         BnfValidationLevel::Structural | BnfValidationLevel::SchemaAware => {
             // Generate grammar based on validation level
@@ -307,27 +319,8 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
                     .with_param("bnf_schema"),
             );
         }
-
-        // Raw BNF cannot be used with thinking mode (BNF constraints all tokens including thinking)
-        // Note: bnf_validation with Structural/SchemaAware WILL support thinking once
-        // grammar generators are implemented (ninchat-upf.2-5)
-        if req.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false) {
-            // Only error if bnf_validation is not set (raw bnf_schema mode)
-            // or if bnf_validation is None (explicitly disabled)
-            match req.bnf_validation {
-                None | Some(BnfValidationLevel::None) => {
-                    return Err(
-                        ApiErrorResponse::invalid_request(
-                            "bnf_schema cannot be used with extended thinking enabled. \
-                             Use bnf_validation: 'structural' instead for thinking-aware constraints.",
-                        )
-                        .with_param("bnf_schema"),
-                    );
-                }
-                // Structural/SchemaAware will handle thinking once implemented
-                Some(BnfValidationLevel::Structural) | Some(BnfValidationLevel::SchemaAware) => {}
-            }
-        }
+        // Note: bnf_schema + thinking is now supported via wrap_grammar_with_thinking()
+        // which automatically prepends thinking block support to user grammars
     }
 
     // Validate bnf_validation if provided
