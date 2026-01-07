@@ -156,6 +156,7 @@ fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
         max_tokens,
         stop,
         sampler,
+        bnf_schema: req.bnf_schema.clone(),
         ..Default::default()
     }
 }
@@ -244,6 +245,26 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
         if let Err(msg) = thinking.validate(req.max_tokens) {
             return Err(
                 ApiErrorResponse::invalid_request(msg).with_param("thinking.budget_tokens"),
+            );
+        }
+    }
+
+    // Validate bnf_schema if provided
+    if let Some(ref schema) = req.bnf_schema {
+        if schema.trim().is_empty() {
+            return Err(
+                ApiErrorResponse::invalid_request("bnf_schema cannot be empty")
+                    .with_param("bnf_schema"),
+            );
+        }
+
+        // BNF cannot be used with thinking mode (BNF constraints all tokens including thinking)
+        if req.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false) {
+            return Err(
+                ApiErrorResponse::invalid_request(
+                    "bnf_schema cannot be used with extended thinking enabled",
+                )
+                .with_param("bnf_schema"),
             );
         }
     }
