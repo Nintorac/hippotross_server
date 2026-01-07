@@ -8,6 +8,7 @@ pub mod adapter;
 pub mod auth;
 pub mod error;
 pub mod file;
+pub mod messages;
 pub mod model;
 pub mod oai;
 
