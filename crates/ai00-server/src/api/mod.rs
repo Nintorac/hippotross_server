@@ -11,6 +11,7 @@ pub mod file;
 pub mod messages;
 pub mod model;
 pub mod oai;
+pub mod request_id;
 
 // pub use adapter::adapters;
 // pub use file::{dir, load_config, models, save_config, unzip};
