@@ -3,8 +3,9 @@
 mod common;
 
 use ai00_server::api::messages::{
-    generate_tool_system_prompt, validate_tool_name, ContentBlock, MessageContent, MessageParam,
-    MessageRole, MessagesRequest, MessagesResponse, StopReason, ThinkingConfig, Tool, ToolChoice,
+    generate_thinking_signature, generate_tool_system_prompt, validate_tool_name, ContentBlock,
+    MessageContent, MessageParam, MessageRole, MessagesRequest, MessagesResponse, StopReason,
+    ThinkingConfig, ThinkingExtractor, ThinkingStreamParser, ThinkingStreamState, Tool, ToolChoice,
     ToolChoiceSimple, ToolChoiceSpecific,
 };
 use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
@@ -742,4 +743,190 @@ fn test_request_with_thinking_config() {
     let thinking = request.thinking.unwrap();
     assert!(thinking.is_enabled());
     assert_eq!(thinking.budget_tokens(), Some(10000));
+}
+
+/// Test ContentBlock::Thinking serialization.
+#[test]
+fn test_thinking_content_block_serialization() {
+    let block = ContentBlock::Thinking {
+        thinking: "Let me reason through this...".to_string(),
+        signature: "sig_abc123def456".to_string(),
+    };
+
+    let json = serde_json::to_value(&block).unwrap();
+    assert_eq!(json["type"], "thinking");
+    assert_eq!(json["thinking"], "Let me reason through this...");
+    assert_eq!(json["signature"], "sig_abc123def456");
+}
+
+/// Test ContentBlock::Thinking deserialization.
+#[test]
+fn test_thinking_content_block_deserialization() {
+    let json = json!({
+        "type": "thinking",
+        "thinking": "Step 1: analyze the problem...",
+        "signature": "sig_1234567890abcdef"
+    });
+
+    let block: ContentBlock = serde_json::from_value(json).unwrap();
+    match block {
+        ContentBlock::Thinking { thinking, signature } => {
+            assert_eq!(thinking, "Step 1: analyze the problem...");
+            assert_eq!(signature, "sig_1234567890abcdef");
+        }
+        _ => panic!("Expected Thinking content block"),
+    }
+}
+
+/// Test response with thinking content block.
+#[test]
+fn test_response_with_thinking_block() {
+    let response = MessagesResponse::new(
+        "rwkv-7-g1".to_string(),
+        vec![
+            ContentBlock::Thinking {
+                thinking: "Let me think about this...".to_string(),
+                signature: "sig_test12345678".to_string(),
+            },
+            ContentBlock::Text {
+                text: "The answer is 42.".to_string(),
+            },
+        ],
+        Default::default(),
+    );
+
+    let json = serde_json::to_value(&response).unwrap();
+
+    // Check thinking block
+    assert_eq!(json["content"][0]["type"], "thinking");
+    assert_eq!(json["content"][0]["thinking"], "Let me think about this...");
+    assert_eq!(json["content"][0]["signature"], "sig_test12345678");
+
+    // Check text block
+    assert_eq!(json["content"][1]["type"], "text");
+    assert_eq!(json["content"][1]["text"], "The answer is 42.");
+}
+
+/// Test that thinking in MessageContent extracts thinking text.
+#[test]
+fn test_message_content_with_thinking_to_text() {
+    let content = MessageContent::Blocks(vec![
+        ContentBlock::Thinking {
+            thinking: "My reasoning process...".to_string(),
+            signature: "sig_ignored".to_string(),
+        },
+        ContentBlock::Text {
+            text: "Final answer".to_string(),
+        },
+    ]);
+
+    let text = content.to_text();
+    // Thinking content should be included
+    assert!(text.contains("My reasoning process..."));
+    assert!(text.contains("Final answer"));
+}
+
+// ThinkingExtractor Integration Tests
+
+/// Test ThinkingExtractor extracts thinking from model output.
+#[test]
+fn test_thinking_extractor_integration() {
+    let extractor = ThinkingExtractor::new();
+    let model_output = "<think>Step 1: Analyze the problem\nStep 2: Consider options\nStep 3: Choose best approach</think>\n\nBased on my analysis, the answer is 42.";
+
+    let result = extractor.extract(model_output);
+
+    assert!(result.has_thinking);
+    assert!(result.thinking.as_ref().unwrap().contains("Step 1"));
+    assert!(result.thinking.as_ref().unwrap().contains("Step 3"));
+    assert_eq!(result.response, "Based on my analysis, the answer is 42.");
+}
+
+/// Test ThinkingExtractor handles missing thinking tags.
+#[test]
+fn test_thinking_extractor_no_thinking() {
+    let extractor = ThinkingExtractor::new();
+    let model_output = "This is a direct response without thinking.";
+
+    let result = extractor.extract(model_output);
+
+    assert!(!result.has_thinking);
+    assert!(result.thinking.is_none());
+    assert_eq!(result.response, model_output);
+}
+
+/// Test signature generation produces consistent results.
+#[test]
+fn test_thinking_signature_consistency() {
+    let thinking = "Some extended reasoning process";
+
+    let sig1 = generate_thinking_signature(thinking);
+    let sig2 = generate_thinking_signature(thinking);
+
+    // Same input should produce same signature
+    assert_eq!(sig1, sig2);
+
+    // Signature format check
+    assert!(sig1.starts_with("sig_"));
+    assert_eq!(sig1.len(), 20); // sig_ (4) + 16 hex chars
+
+    // Different input should produce different signature
+    let sig3 = generate_thinking_signature("Different thinking");
+    assert_ne!(sig1, sig3);
+}
+
+// ThinkingStreamParser Integration Tests
+
+/// Test ThinkingStreamParser handles complete thinking flow.
+#[test]
+fn test_thinking_stream_parser_full_flow() {
+    let mut parser = ThinkingStreamParser::new();
+
+    // Start in thinking state
+    assert_eq!(parser.state(), ThinkingStreamState::InsideThinking);
+
+    // Feed thinking content
+    let r1 = parser.feed("Let me think");
+    assert!(r1.thinking.is_some());
+    assert!(!r1.thinking_complete);
+
+    // Feed more thinking
+    let r2 = parser.feed(" about this problem...");
+    assert!(r2.thinking.is_some());
+
+    // Feed end tag and response
+    let r3 = parser.feed("</think>\n\nThe answer is 42.");
+    assert!(r3.thinking_complete);
+    assert_eq!(parser.state(), ThinkingStreamState::AfterThinking);
+
+    // Verify accumulated content
+    assert!(parser.thinking_content().contains("Let me think"));
+    assert!(parser.thinking_content().contains("about this problem"));
+}
+
+/// Test ThinkingStreamParser handles split end tag.
+#[test]
+fn test_thinking_stream_parser_split_tag() {
+    let mut parser = ThinkingStreamParser::new();
+
+    // Feed content ending with partial tag
+    parser.feed("thinking</th");
+    assert_eq!(parser.state(), ThinkingStreamState::InsideThinking);
+
+    // Complete the tag
+    let result = parser.feed("ink>response");
+    assert!(result.thinking_complete);
+    assert_eq!(parser.state(), ThinkingStreamState::AfterThinking);
+}
+
+/// Test ThinkingStreamParser finalize without end tag.
+#[test]
+fn test_thinking_stream_parser_finalize_incomplete() {
+    let mut parser = ThinkingStreamParser::new();
+
+    parser.feed("Still thinking without closing tag");
+    let result = parser.finalize();
+
+    // Should mark thinking as complete even without end tag
+    assert!(result.thinking_complete);
 }
