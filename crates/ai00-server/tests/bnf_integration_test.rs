@@ -23,13 +23,26 @@ use ai00_server::api::messages::{
     Tool,
 };
 use flume::Sender;
+use lazy_static::lazy_static;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::{OnceCell, RwLock};
 use web_rwkv::tokenizer::Tokenizer;
+
+// ============================================================================
+// Global Runtime (persists across all tests)
+// ============================================================================
+
+lazy_static! {
+    /// Global runtime for the serve task.
+    /// This runtime persists across all tests so the serve task doesn't die
+    /// when individual test runtimes are dropped.
+    static ref GLOBAL_RUNTIME: Runtime = Runtime::new().expect("Failed to create global runtime");
+}
 
 // ============================================================================
 // Shared Model Instance (loaded once for all tests)
@@ -101,8 +114,10 @@ fn load_tokenizer() -> Tokenizer {
 async fn setup_model_internal() -> (Sender<ThreadRequest>, Arc<Tokenizer>) {
     let (sender, receiver) = flume::unbounded::<ThreadRequest>();
 
-    // Spawn the ai00_core server
-    tokio::spawn(ai00_core::serve(receiver));
+    // Spawn the ai00_core server on the GLOBAL_RUNTIME so it persists across tests.
+    // Each #[tokio::test] creates its own runtime that gets dropped when the test ends.
+    // By spawning on GLOBAL_RUNTIME, the serve task survives across all tests.
+    GLOBAL_RUNTIME.spawn(ai00_core::serve(receiver));
 
     // Load the tokenizer
     let tokenizer_contents =
