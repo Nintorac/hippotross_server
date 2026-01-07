@@ -499,6 +499,13 @@ pub struct MessagesRequest {
     /// Metadata for request tracking (forward compatibility - ignored)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+
+    /// BNF grammar schema for constrained generation.
+    /// When provided, the model output will be constrained to match this grammar.
+    /// Uses KBNF format (see json2kbnf.py for generating from JSON schemas).
+    /// Note: Cannot be used with extended thinking enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bnf_schema: Option<String>,
 }
 
 /// Messages API response.

@@ -970,3 +970,93 @@ fn test_stream_error_event_with_partial() {
     assert!(json["error"]["partial_content"].is_array());
     assert_eq!(json["error"]["partial_content"][0]["type"], "text");
 }
+
+// =============================================================================
+// BNF Schema Tests
+// =============================================================================
+
+/// Test request with bnf_schema serializes correctly.
+#[test]
+fn test_bnf_schema_serialization() {
+    let request = MessagesRequest {
+        model: "test".into(),
+        messages: vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Hello".into()),
+        }],
+        system: None,
+        max_tokens: 100,
+        stream: false,
+        stop_sequences: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        metadata: None,
+        bnf_schema: Some("start ::= \"hello\"".into()),
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["bnf_schema"], "start ::= \"hello\"");
+}
+
+/// Test request without bnf_schema deserializes correctly (optional field).
+#[test]
+fn test_bnf_schema_optional() {
+    let json = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 100
+    });
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert!(request.bnf_schema.is_none());
+}
+
+/// Test bnf_schema is not serialized when None.
+#[test]
+fn test_bnf_schema_skips_serialization_when_none() {
+    let request = MessagesRequest {
+        model: "test".into(),
+        messages: vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Hello".into()),
+        }],
+        system: None,
+        max_tokens: 100,
+        stream: false,
+        stop_sequences: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        metadata: None,
+        bnf_schema: None,
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert!(json.get("bnf_schema").is_none());
+}
+
+/// Test bnf_schema deserialization with complex grammar.
+#[test]
+fn test_bnf_schema_complex_grammar() {
+    let grammar = r#"start ::= json_object
+json_object ::= "{" key_value_list "}"
+key_value_list ::= key_value ("," key_value)*
+key_value ::= string ":" value
+string ::= "\"" [a-zA-Z]+ "\""
+value ::= string | number
+number ::= [0-9]+"#;
+
+    let json = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "Generate JSON"}],
+        "max_tokens": 100,
+        "bnf_schema": grammar
+    });
+
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(request.bnf_schema.as_deref(), Some(grammar));
+}
