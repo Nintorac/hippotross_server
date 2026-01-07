@@ -3,6 +3,7 @@
 //! This module provides a `/v1/messages` endpoint compatible with
 //! Anthropic's Claude Messages API format.
 
+pub mod bnf_grammars;
 mod handler;
 mod streaming;
 mod thinking_extractor;
