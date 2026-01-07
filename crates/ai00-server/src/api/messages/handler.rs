@@ -243,12 +243,10 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
 
     let mut output_tokens = 0usize;
     let mut start_token = true;
-    let mut started = false;
 
     let stream = token_receiver.into_stream().map(move |token| -> Result<SseEvent, std::convert::Infallible> {
         match token {
             Token::Start => {
-                started = true;
                 // Emit message_start event
                 Ok(emit_message_start(message_id.clone(), model_name.clone(), input_tokens))
             }

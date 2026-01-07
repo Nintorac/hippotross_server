@@ -6,7 +6,7 @@ use std::{
 };
 
 use ai00_core::ThreadRequest;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use clap::{CommandFactory, Parser};
 use memmap2::Mmap;
 use salvo::{
@@ -20,47 +20,12 @@ use salvo::{
     serve_static::StaticDir,
     Router,
 };
-use tokio::{
-    fs::File,
-    io::{AsyncReadExt, BufReader},
-    signal,
-};
+use tokio::{fs::File, signal};
 
-use crate::types::JwtClaims;
-
-mod api;
-mod config;
-mod types;
-
-const SLEEP: Duration = Duration::from_millis(500);
-
-pub fn build_path(path: impl AsRef<Path>, name: impl AsRef<Path>) -> Result<PathBuf> {
-    let permitted = path.as_ref();
-    let name = name.as_ref();
-    if name.ancestors().any(|p| p.ends_with(Path::new(".."))) {
-        bail!("cannot have \"..\" in names");
-    }
-    let path = match name.is_absolute() || name.starts_with(permitted) {
-        true => name.into(),
-        false => permitted.join(name),
-    };
-    match path.starts_with(permitted) {
-        true => Ok(path),
-        false => bail!("path not permitted"),
-    }
-}
-
-pub fn check_path_permitted(path: impl AsRef<Path>, permitted: &[&str]) -> Result<()> {
-    let current_path = std::env::current_dir()?;
-    for sub in permitted {
-        let permitted = current_path.join(sub).canonicalize()?;
-        let path = path.as_ref().canonicalize()?;
-        if path.starts_with(permitted) {
-            return Ok(());
-        }
-    }
-    bail!("path not permitted");
-}
+use ai00_server::{api, config, load_config, types};
+#[cfg(feature = "embed")]
+use ai00_server::TextEmbed;
+use types::JwtClaims;
 
 async fn load_web(path: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<()> {
     let file = File::open(path).await?;
@@ -88,21 +53,6 @@ async fn load_plugin(
 
     zip.extract(&dir)?;
     Ok(())
-}
-
-async fn load_config(path: impl AsRef<Path>) -> Result<config::Config> {
-    let file = File::open(path).await?;
-    let mut reader = BufReader::new(file);
-    let mut contents = String::new();
-    reader.read_to_string(&mut contents).await?;
-    Ok(toml::from_str(&contents)?)
-}
-
-#[cfg(feature = "embed")]
-pub struct TextEmbed {
-    pub tokenizer: tokenizers::Tokenizer,
-    pub model: fastembed::TextEmbedding,
-    pub info: fastembed::ModelInfo<fastembed::EmbeddingModel>,
 }
 
 #[cfg(feature = "embed")]

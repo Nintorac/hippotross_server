@@ -78,8 +78,12 @@ features = [
     "quinn",
     "serve-static",
     "sse",
+    "test",
 ]
 workspace = true
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
+rstest = "0.22"
+tokio-test = "0.4"
+assert-json-diff = "2.0"
