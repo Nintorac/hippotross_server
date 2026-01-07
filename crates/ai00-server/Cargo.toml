@@ -42,6 +42,7 @@ memmap2.workspace = true
 safetensors.workspace = true
 serde.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 web-rwkv.workspace = true
 
 [dependencies.fastembed]

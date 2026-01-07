@@ -300,6 +300,7 @@ async fn main() {
         .push(Router::with_path("/models/info").get(api::model::info))
         .push(Router::with_path("/models/list").get(api::file::models))
         .push(Router::with_path("/models/state").get(api::model::state))
+        // OpenAI-compatible endpoints
         .push(Router::with_path("/oai/models").get(api::oai::models))
         .push(Router::with_path("/oai/v1/models").get(api::oai::models))
         .push(Router::with_path("/oai/completions").post(api::oai::completions))
@@ -309,7 +310,9 @@ async fn main() {
         .push(Router::with_path("/oai/states").post(api::oai::states))
         .push(Router::with_path("/oai/v1/states").post(api::oai::states))
         .push(Router::with_path("/oai/chooses").post(api::oai::chooses))
-        .push(Router::with_path("/oai/v1/chooses").post(api::oai::chooses));
+        .push(Router::with_path("/oai/v1/chooses").post(api::oai::chooses))
+        // Claude-compatible Messages API
+        .push(Router::with_path("/v1/messages").post(api::messages::messages_handler));
     #[cfg(feature = "embed")]
     let api_embed = Router::new()
         .push(Router::with_path("/oai/embeds").post(api::oai::embeds))
