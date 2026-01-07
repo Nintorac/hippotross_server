@@ -18,12 +18,32 @@ use crate::{
 use ai00_core::sampler::nucleus::{NucleusParams, NucleusSampler};
 
 /// Build RWKV prompt from messages.
-fn build_prompt(system: Option<&str>, messages: &[MessageParam]) -> String {
+fn build_prompt(
+    system: Option<&str>,
+    messages: &[MessageParam],
+    tools: Option<&[Tool]>,
+) -> String {
     let mut prompt = String::new();
 
     // Add system prompt first (from top-level param, not message role)
     if let Some(sys) = system {
-        prompt.push_str(&format!("System: {}\n\n", sys));
+        prompt.push_str(&format!("System: {}", sys));
+
+        // Inject tool definitions into system prompt if provided
+        if let Some(tools) = tools {
+            if !tools.is_empty() {
+                prompt.push_str(&generate_tool_system_prompt(tools));
+            }
+        }
+
+        prompt.push_str("\n\n");
+    } else if let Some(tools) = tools {
+        // If no system prompt but tools provided, create one for tools
+        if !tools.is_empty() {
+            prompt.push_str("System:");
+            prompt.push_str(&generate_tool_system_prompt(tools));
+            prompt.push_str("\n\n");
+        }
     }
 
     // Format conversation
@@ -43,7 +63,11 @@ fn build_prompt(system: Option<&str>, messages: &[MessageParam]) -> String {
 
 /// Convert MessagesRequest to GenerateRequest.
 fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
-    let prompt = build_prompt(req.system.as_deref(), &req.messages);
+    let prompt = build_prompt(
+        req.system.as_deref(),
+        &req.messages,
+        req.tools.as_deref(),
+    );
 
     // Extract model text from previous assistant messages
     let model_text = req

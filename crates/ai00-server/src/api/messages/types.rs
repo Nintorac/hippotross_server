@@ -219,6 +219,58 @@ impl Tool {
         }
         Ok(())
     }
+
+    /// Format this tool as markdown for prompt injection.
+    pub fn to_markdown(&self) -> String {
+        let mut md = format!("### {}\n", self.name);
+
+        if let Some(desc) = &self.description {
+            md.push_str(&format!("{}\n\n", desc));
+        }
+
+        md.push_str("**Input Schema:**\n```json\n");
+        md.push_str(&serde_json::to_string_pretty(&self.input_schema).unwrap_or_default());
+        md.push_str("\n```\n");
+
+        md
+    }
+}
+
+/// Generate a system prompt section describing available tools.
+///
+/// This function creates a markdown-formatted description of tools that can be
+/// prepended or appended to the system prompt to enable tool use.
+///
+/// The format instructs the model to output tool calls in a specific XML-like format:
+/// ```text
+/// <tool_use>
+/// <name>tool_name</name>
+/// <input>{"param": "value"}</input>
+/// </tool_use>
+/// ```
+pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
+    if tools.is_empty() {
+        return String::new();
+    }
+
+    let mut prompt = String::from(
+        "\n\n## Available Tools\n\n\
+         You have access to the following tools. To use a tool, respond with a tool_use block:\n\n\
+         ```\n\
+         <tool_use>\n\
+         <name>tool_name</name>\n\
+         <input>{\"parameter\": \"value\"}</input>\n\
+         </tool_use>\n\
+         ```\n\n\
+         You may use multiple tools in a single response if needed.\n\n",
+    );
+
+    for tool in tools {
+        prompt.push_str(&tool.to_markdown());
+        prompt.push('\n');
+    }
+
+    prompt
 }
 
 /// How the model should choose which tool to use.
