@@ -71,21 +71,21 @@ pub fn json_schema_to_kbnf(schema: &Value, rule_name: &str, ctx: &mut GeneratorC
         Some("object") => handle_object(schema, rule_name, ctx),
         Some("string") => handle_string(schema, rule_name, ctx),
         Some("number") | Some("integer") => {
-            ctx.add_rule(format!("{} ::= number;", rule_name));
+            ctx.add_rule(format!("{}::=number;", rule_name));
             rule_name.to_string()
         }
         Some("boolean") => {
-            ctx.add_rule(format!("{} ::= \"true\" | \"false\";", rule_name));
+            ctx.add_rule(format!("{}::='true' | 'false';", rule_name));
             rule_name.to_string()
         }
         Some("array") => handle_array(schema, rule_name, ctx),
         Some("null") => {
-            ctx.add_rule(format!("{} ::= \"null\";", rule_name));
+            ctx.add_rule(format!("{}::='null';", rule_name));
             rule_name.to_string()
         }
         _ => {
             // Unknown or missing type - fallback to generic JSON value
-            ctx.add_rule(format!("{} ::= json_value;", rule_name));
+            ctx.add_rule(format!("{}::=json_value;", rule_name));
             rule_name.to_string()
         }
     }
@@ -101,7 +101,7 @@ fn handle_any_of(variants: &[Value], rule_name: &str, ctx: &mut GeneratorContext
         variant_rules.push(variant_name);
     }
 
-    ctx.add_rule(format!("{} ::= {};", rule_name, variant_rules.join(" | ")));
+    ctx.add_rule(format!("{}::={};", rule_name, variant_rules.join(" | ")));
     rule_name.to_string()
 }
 
@@ -118,7 +118,7 @@ fn handle_object(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) ->
         Some(p) if !p.is_empty() => p,
         _ => {
             // Empty object or no properties - allow any JSON object
-            ctx.add_rule(format!("{} ::= json_object;", rule_name));
+            ctx.add_rule(format!("{}::=json_object;", rule_name));
             return rule_name.to_string();
         }
     };
@@ -143,26 +143,26 @@ fn handle_object(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) ->
         let value_rule = ctx.unique_rule(&format!("{}_prop_{}", rule_name, key));
         json_schema_to_kbnf(prop_schema, &value_rule, ctx);
 
-        let comma = if i > 0 { "\",\" ws " } else { "" };
+        let comma = if i > 0 { "',' ws " } else { "" };
         property_parts.push(format!(
-            "{}\"\\\"{}\\\"\" ws \":\" ws {}",
+            "{}'\"{}\"' ws ':' ws {}",
             comma, key, value_rule
         ));
     }
 
-    // Optional properties (wrapped in [...])
+    // Optional properties (wrapped in (...)?)
     for (key, prop_schema) in optional_props.iter() {
         let value_rule = ctx.unique_rule(&format!("{}_prop_{}", rule_name, key));
         json_schema_to_kbnf(prop_schema, &value_rule, ctx);
 
         // Optional property needs comma handling
-        let comma_prefix = if !property_parts.is_empty() || required_props.len() > 0 {
-            "\",\" ws "
+        let comma_prefix = if !property_parts.is_empty() || !required_props.is_empty() {
+            "',' ws "
         } else {
             ""
         };
         property_parts.push(format!(
-            "[{}\"\\\"{}\\\"\" ws \":\" ws {}]",
+            "({}'\"{}\"' ws ':' ws {})?",
             comma_prefix, key, value_rule
         ));
     }
@@ -170,7 +170,7 @@ fn handle_object(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) ->
     // Build the object rule
     let members = property_parts.join(" ws ");
     ctx.add_rule(format!(
-        "{} ::= \"{{\" ws {} ws \"}}\";",
+        "{}::='{{' ws {} ws '}}';",
         rule_name, members
     ));
 
@@ -184,16 +184,16 @@ fn handle_string(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) ->
         let vals: Vec<String> = enum_vals
             .iter()
             .filter_map(|v| v.as_str())
-            .map(|s| format!("\"\\\"{}\\\"\"", escape_kbnf_string(s)))
+            .map(|s| format!("'\"{}\"'", escape_kbnf_string(s)))
             .collect();
 
         if vals.is_empty() {
-            ctx.add_rule(format!("{} ::= string;", rule_name));
+            ctx.add_rule(format!("{}::=string;", rule_name));
         } else {
-            ctx.add_rule(format!("{} ::= {};", rule_name, vals.join(" | ")));
+            ctx.add_rule(format!("{}::={};", rule_name, vals.join(" | ")));
         }
     } else {
-        ctx.add_rule(format!("{} ::= string;", rule_name));
+        ctx.add_rule(format!("{}::=string;", rule_name));
     }
 
     rule_name.to_string()
@@ -209,16 +209,16 @@ fn handle_array(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) -> 
         // Array with typed items
         let elements_rule = ctx.unique_rule(&format!("{}_elements", rule_name));
         ctx.add_rule(format!(
-            "{} ::= {} (\",\" ws {})*;",
+            "{}::={} (',' ws {})*;",
             elements_rule, items_rule, items_rule
         ));
         ctx.add_rule(format!(
-            "{} ::= \"[\" ws [{}] ws \"]\";",
+            "{}::='[' ws {}? ws ']';",
             rule_name, elements_rule
         ));
     } else {
         // No items schema - allow any JSON array
-        ctx.add_rule(format!("{} ::= json_array;", rule_name));
+        ctx.add_rule(format!("{}::=json_array;", rule_name));
     }
 
     rule_name.to_string()
@@ -262,10 +262,10 @@ pub fn generate_tool_name_grammar(tools: &[Tool]) -> String {
 
     let names: Vec<String> = tools
         .iter()
-        .map(|t| format!("\"{}\"", t.name))
+        .map(|t| format!("'{}'", t.name))
         .collect();
 
-    format!("tool_name ::= {};", names.join(" | "))
+    format!("tool_name::={};", names.join(" | "))
 }
 
 /// Generate input grammar for each tool based on its input_schema.
@@ -295,7 +295,7 @@ pub fn generate_tool_grammars(tools: &[Tool]) -> String {
 
         // Tool call rule: {"name": "tool_name", "input": ...}
         ctx.add_rule(format!(
-            r#"{} ::= "{{" ws "\"name\"" ws ":" ws "\"{}\"" ws "," ws "\"input\"" ws ":" ws {} ws "}}";"#,
+            r#"{}::='{{' ws '"name"' ws ':' ws '"{}"' ws ',' ws '"input"' ws ':' ws {} ws '}}';"#,
             call_rule, tool.name, input_rule
         ));
 
@@ -303,7 +303,7 @@ pub fn generate_tool_grammars(tools: &[Tool]) -> String {
     }
 
     // Dispatch rule - alternation of all tool calls
-    ctx.add_rule(format!("tool_call ::= {};", tool_calls.join(" | ")));
+    ctx.add_rule(format!("tool_call::={};", tool_calls.join(" | ")));
 
     ctx.into_grammar()
 }
@@ -327,26 +327,20 @@ pub fn generate_schema_aware_grammar(tools: &[Tool], thinking_enabled: bool) -> 
     // Text and tool structure rules
     if thinking_enabled {
         grammar.push_str(r#"
-start ::= [thinking_block] text_or_tools;
-thinking_block ::= "<think>" thinking_content "</think>" ws;
-thinking_content ::= #"[^<]*(?:<(?!/think>)[^<]*)*";
+start::=thinking_block? text_or_tools;
+thinking_block::='<think>' thinking_content '</think>' ws;
+thinking_content::=#'[^<]*';
 "#);
     } else {
-        grammar.push_str("start ::= text_or_tools;\n");
+        grammar.push_str("start::=text_or_tools;\n");
     }
 
     grammar.push_str(r#"
-text_or_tools ::= [text] [tool_sequence];
-tool_sequence ::= tool_use [text] [tool_sequence];
-tool_use ::= "<tool_use>" ws tool_call ws "</tool_use>";
+text_or_tools::=text? tool_sequence?;
+tool_sequence::=tool_use text? tool_sequence?;
+tool_use::='<tool_use>' ws tool_call ws '</tool_use>';
+text::=#'[^<]*';
 "#);
-
-    // Text pattern depends on whether thinking is enabled
-    if thinking_enabled {
-        grammar.push_str(r#"text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>|think>|/think>)[^<]*)*";"#);
-    } else {
-        grammar.push_str(r#"text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>)[^<]*)*";"#);
-    }
     grammar.push('\n');
 
     // Tool-specific rules
@@ -453,7 +447,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "test_str", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("test_str ::= string;"));
+        assert!(grammar.contains("test_str::=string;"));
     }
 
     #[test]
@@ -465,10 +459,10 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "color", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("color ::="));
-        assert!(grammar.contains(r#"\"red\""#));
-        assert!(grammar.contains(r#"\"green\""#));
-        assert!(grammar.contains(r#"\"blue\""#));
+        assert!(grammar.contains("color::="));
+        assert!(grammar.contains(r#""red""#));
+        assert!(grammar.contains(r#""green""#));
+        assert!(grammar.contains(r#""blue""#));
     }
 
     #[test]
@@ -477,7 +471,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "num", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("num ::= number;"));
+        assert!(grammar.contains("num::=number;"));
     }
 
     #[test]
@@ -486,7 +480,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "int", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("int ::= number;"));
+        assert!(grammar.contains("int::=number;"));
     }
 
     #[test]
@@ -495,7 +489,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "flag", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("flag ::= \"true\" | \"false\";"));
+        assert!(grammar.contains("flag::='true' | 'false';"));
     }
 
     #[test]
@@ -504,7 +498,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "nil", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("nil ::= \"null\";"));
+        assert!(grammar.contains("nil::='null';"));
     }
 
     #[test]
@@ -522,11 +516,11 @@ mod tests {
         let grammar = ctx.into_grammar();
 
         // Should have person rule with object syntax
-        assert!(grammar.contains("person ::= \"{\""));
+        assert!(grammar.contains("person::='{'"));
         // Should have property rules
-        assert!(grammar.contains(r#"\"name\""#));
-        // Age should be optional (wrapped in [...])
-        assert!(grammar.contains("["));
+        assert!(grammar.contains(r#""name""#));
+        // Age should be optional (wrapped in (...)?)
+        assert!(grammar.contains("?"));
     }
 
     #[test]
@@ -549,9 +543,9 @@ mod tests {
         let grammar = ctx.into_grammar();
 
         // Should have rules for both levels
-        assert!(grammar.contains("data ::="));
-        assert!(grammar.contains(r#"\"user\""#));
-        assert!(grammar.contains(r#"\"email\""#));
+        assert!(grammar.contains("data::="));
+        assert!(grammar.contains(r#""user""#));
+        assert!(grammar.contains(r#""email""#));
     }
 
     #[test]
@@ -560,7 +554,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "arr", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("arr ::= json_array;"));
+        assert!(grammar.contains("arr::=json_array;"));
     }
 
     #[test]
@@ -574,8 +568,8 @@ mod tests {
         let grammar = ctx.into_grammar();
 
         // Should have array rule with items
-        assert!(grammar.contains("tags ::= \"[\""));
-        assert!(grammar.contains("\"]\""));
+        assert!(grammar.contains("tags::='['"));
+        assert!(grammar.contains("']'"));
     }
 
     #[test]
@@ -591,7 +585,7 @@ mod tests {
         let grammar = ctx.into_grammar();
 
         // Should have alternation
-        assert!(grammar.contains("str_or_num ::="));
+        assert!(grammar.contains("str_or_num::="));
         assert!(grammar.contains(" | "));
     }
 
@@ -607,7 +601,7 @@ mod tests {
         json_schema_to_kbnf(&schema, "bool_or_null", &mut ctx);
         let grammar = ctx.into_grammar();
 
-        assert!(grammar.contains("bool_or_null ::="));
+        assert!(grammar.contains("bool_or_null::="));
         assert!(grammar.contains(" | "));
     }
 
@@ -617,7 +611,7 @@ mod tests {
         let mut ctx = GeneratorContext::new();
         json_schema_to_kbnf(&schema, "any", &mut ctx);
         let grammar = ctx.into_grammar();
-        assert!(grammar.contains("any ::= json_value;"));
+        assert!(grammar.contains("any::=json_value;"));
     }
 
     #[test]
@@ -626,9 +620,9 @@ mod tests {
         let grammar = schema_to_grammar(&schema, "start");
 
         // Should include primitives from bnf_grammars
-        assert!(grammar.contains("json_object ::="));
-        assert!(grammar.contains("json_value ::="));
-        assert!(grammar.contains("string ::="));
+        assert!(grammar.contains("json_object::="));
+        assert!(grammar.contains("json_value::="));
+        assert!(grammar.contains("string::="));
     }
 
     #[test]
@@ -673,10 +667,10 @@ mod tests {
         let grammar = ctx.into_grammar();
 
         // Required field
-        assert!(grammar.contains(r#"\"location\""#));
+        assert!(grammar.contains(r#""location""#));
         // Enum field
-        assert!(grammar.contains(r#"\"celsius\""#));
-        assert!(grammar.contains(r#"\"fahrenheit\""#));
+        assert!(grammar.contains(r#""celsius""#));
+        assert!(grammar.contains(r#""fahrenheit""#));
     }
 
     // --- Tool Grammar Generation Tests ---
@@ -700,7 +694,7 @@ mod tests {
     fn test_generate_tool_name_grammar_single() {
         let tools = vec![make_tool("get_weather", json!({"type": "object"}))];
         let grammar = generate_tool_name_grammar(&tools);
-        assert_eq!(grammar, r#"tool_name ::= "get_weather";"#);
+        assert_eq!(grammar, r#"tool_name::='get_weather';"#);
     }
 
     #[test]
@@ -711,10 +705,10 @@ mod tests {
             make_tool("calculate", json!({"type": "object"})),
         ];
         let grammar = generate_tool_name_grammar(&tools);
-        assert!(grammar.contains("tool_name ::="));
-        assert!(grammar.contains(r#""get_weather""#));
-        assert!(grammar.contains(r#""search""#));
-        assert!(grammar.contains(r#""calculate""#));
+        assert!(grammar.contains("tool_name::="));
+        assert!(grammar.contains(r#"'get_weather'"#));
+        assert!(grammar.contains(r#"'search'"#));
+        assert!(grammar.contains(r#"'calculate'"#));
         assert!(grammar.contains(" | "));
     }
 
@@ -739,13 +733,13 @@ mod tests {
         let grammar = generate_tool_grammars(&tools);
 
         // Should have tool call rule
-        assert!(grammar.contains("get_weather_call ::="));
+        assert!(grammar.contains("get_weather_call::="));
         // Should reference input rule
         assert!(grammar.contains("get_weather_input"));
         // Should have dispatch rule
-        assert!(grammar.contains("tool_call ::= get_weather_call;"));
+        assert!(grammar.contains("tool_call::=get_weather_call;"));
         // Should have location property
-        assert!(grammar.contains(r#"\"location\""#));
+        assert!(grammar.contains(r#""location""#));
     }
 
     #[test]
@@ -771,11 +765,11 @@ mod tests {
         let grammar = generate_tool_grammars(&tools);
 
         // Both tools should have call rules
-        assert!(grammar.contains("get_weather_call ::="));
-        assert!(grammar.contains("search_call ::="));
+        assert!(grammar.contains("get_weather_call::="));
+        assert!(grammar.contains("search_call::="));
 
         // Dispatch rule should have alternation
-        assert!(grammar.contains("tool_call ::="));
+        assert!(grammar.contains("tool_call::="));
         assert!(grammar.contains("get_weather_call"));
         assert!(grammar.contains("search_call"));
         assert!(grammar.contains(" | "));
@@ -800,8 +794,8 @@ mod tests {
         let grammar = generate_tool_grammars(&tools);
 
         // Should have enum values
-        assert!(grammar.contains(r#"\"celsius\""#));
-        assert!(grammar.contains(r#"\"fahrenheit\""#));
+        assert!(grammar.contains(r#""celsius""#));
+        assert!(grammar.contains(r#""fahrenheit""#));
     }
 
     #[test]
@@ -817,16 +811,16 @@ mod tests {
         let grammar = generate_schema_aware_grammar(&tools, false);
 
         // Should have base primitives
-        assert!(grammar.contains("json_object ::="));
+        assert!(grammar.contains("json_object::="));
 
         // Should have start rule without thinking
-        assert!(grammar.contains("start ::= text_or_tools;"));
+        assert!(grammar.contains("start::=text_or_tools;"));
 
         // Should NOT have thinking block
         assert!(!grammar.contains("thinking_block"));
 
         // Should have tool structure
-        assert!(grammar.contains("tool_use ::="));
+        assert!(grammar.contains("tool_use::="));
         assert!(grammar.contains("tool_call"));
     }
 
@@ -848,7 +842,7 @@ mod tests {
         assert!(grammar.contains("</think>"));
 
         // Start rule should include thinking
-        assert!(grammar.contains("[thinking_block]"));
+        assert!(grammar.contains("thinking_block?"));
 
         // Text pattern should exclude thinking tags
         assert!(grammar.contains("think>"));
@@ -884,7 +878,7 @@ mod tests {
         let grammar = generate_schema_aware_grammar(&tools, false);
 
         // All expected components
-        assert!(grammar.contains("start ::="));
+        assert!(grammar.contains("start::="));
         assert!(grammar.contains("text_or_tools"));
         assert!(grammar.contains("tool_sequence"));
         assert!(grammar.contains("tool_use"));
@@ -892,7 +886,7 @@ mod tests {
         assert!(grammar.contains("</tool_use>"));
 
         // Tool dispatch
-        assert!(grammar.contains("tool_call ::="));
+        assert!(grammar.contains("tool_call::="));
         assert!(grammar.contains("get_weather_call"));
         assert!(grammar.contains("search_call"));
 
@@ -1002,7 +996,7 @@ mod tests {
         // Should have tool-specific rules
         assert!(grammar.contains("get_weather_call"));
         assert!(grammar.contains("get_weather_input"));
-        assert!(grammar.contains("tool_call ::="));
+        assert!(grammar.contains("tool_call::="));
     }
 
     #[test]

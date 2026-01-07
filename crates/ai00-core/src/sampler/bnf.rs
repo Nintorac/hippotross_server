@@ -26,7 +26,8 @@ impl BnfSampler {
             .map(|(k, v)| (k as u32, String::from_utf8_lossy(v).to_string()))
             .collect();
         let vocab = Vocabulary::new(tokens, strings)?;
-        let engine = Engine::new(schema, vocab)?;
+        let mut engine = Engine::new(schema, vocab)?;
+        engine.compute_allowed_token_ids();
         Ok(Self(engine))
     }
 }
