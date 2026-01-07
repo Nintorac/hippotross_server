@@ -17,16 +17,16 @@
 ///
 /// These rules are designed to be composed with other grammars.
 pub const GRAMMAR_JSON_PRIMITIVES: &str = r#"
-json_object ::= "{" ws [members] ws "}";
-members ::= pair ("," ws pair)*;
-pair ::= string ws ":" ws json_value;
-json_value ::= string | number | json_object | json_array | "true" | "false" | "null";
-json_array ::= "[" ws [elements] ws "]";
-elements ::= json_value ("," ws json_value)*;
-string ::= '"' string_content '"';
-string_content ::= #"[^\"\\]*(\\.[^\"\\]*)*";
-number ::= #"-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?";
-ws ::= #"[ \t\n\r]*";
+json_object::='{' ws members ws '}';
+members::=pair (',' ws pair)*;
+pair::=string ws ':' ws json_value;
+json_value::=string | number | json_object | json_array | 'true' | 'false' | 'null';
+json_array::='[' ws elements ws ']';
+elements::=json_value (',' ws json_value)*;
+string::='"' string_content '"';
+string_content::=#'[^"\\\\]*(\\\\.[^"\\\\]*)*';
+number::=#'-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?';
+ws::=#'[ \\t\\n\\r]*';
 "#;
 
 /// Thinking-only grammar for extended thinking mode.
@@ -38,11 +38,11 @@ ws ::= #"[ \t\n\r]*";
 /// The thinking content allows any characters except the closing tag,
 /// enabling free-form reasoning inside the thinking block.
 pub const GRAMMAR_THINKING_ONLY: &str = r#"
-start ::= thinking_response | plain_response;
-thinking_response ::= "<think>" thinking_content "</think>" ws response;
-thinking_content ::= #"[^<]*(?:<(?!/think>)[^<]*)*";
-plain_response ::= response;
-response ::= #"[\s\S]*";
+start::=thinking_response | plain_response;
+thinking_response::='<think>' thinking_content '</think>' ws response;
+thinking_content::=#'[^<]*';
+plain_response::=response;
+response::=#'[^\\x00]*';
 "#;
 
 /// Tool call structure grammar without schema validation.
@@ -55,12 +55,12 @@ response ::= #"[\s\S]*";
 /// Note: This grammar validates structure only, not the actual tool names
 /// or input schemas. Use SchemaAware level for full validation.
 pub const GRAMMAR_TOOLS_ONLY: &str = r#"
-start ::= text_or_tools;
-text_or_tools ::= [text] [tool_sequence];
-tool_sequence ::= tool_use [text] [tool_sequence];
-tool_use ::= "<tool_use>" ws tool_json ws "</tool_use>";
-tool_json ::= "{" ws "\"name\"" ws ":" ws string ws "," ws "\"input\"" ws ":" ws json_object ws "}";
-text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>)[^<]*)*";
+start::=text_or_tools;
+text_or_tools::=text? tool_sequence?;
+tool_sequence::=tool_use text? tool_sequence?;
+tool_use::='<tool_use>' ws tool_json ws '</tool_use>';
+tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"input"' ws ':' ws json_object ws '}';
+text::=#'[^<]*';
 "#;
 
 /// Combined grammar for thinking blocks with tool calls.
@@ -71,14 +71,14 @@ text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>)[^<]*)*";
 ///
 /// This grammar is used when both extended thinking and tools are enabled.
 pub const GRAMMAR_THINKING_PLUS_TOOLS: &str = r#"
-start ::= [thinking_block] text_or_tools;
-thinking_block ::= "<think>" thinking_content "</think>" ws;
-thinking_content ::= #"[^<]*(?:<(?!/think>)[^<]*)*";
-text_or_tools ::= [text] [tool_sequence];
-tool_sequence ::= tool_use [text] [tool_sequence];
-tool_use ::= "<tool_use>" ws tool_json ws "</tool_use>";
-tool_json ::= "{" ws "\"name\"" ws ":" ws string ws "," ws "\"input\"" ws ":" ws json_object ws "}";
-text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>|think>|/think>)[^<]*)*";
+start::=thinking_block? text_or_tools;
+thinking_block::='<think>' thinking_content '</think>' ws;
+thinking_content::=#'[^<]*';
+text_or_tools::=text? tool_sequence?;
+tool_sequence::=tool_use text? tool_sequence?;
+tool_use::='<tool_use>' ws tool_json ws '</tool_use>';
+tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"input"' ws ':' ws json_object ws '}';
+text::=#'[^<]*';
 "#;
 
 /// Thinking wrapper for user-provided grammars.
@@ -88,10 +88,10 @@ text ::= #"[^<]*(?:<(?!tool_use>|/tool_use>|think>|/think>)[^<]*)*";
 ///
 /// Usage: Prepend to user's grammar where their start rule becomes `user_start`.
 pub const GRAMMAR_THINKING_WRAPPER: &str = r#"
-start ::= [thinking_block] user_start;
-thinking_block ::= "<think>" thinking_content "</think>" ws;
-thinking_content ::= #"[^<]*(?:<(?!/think>)[^<]*)*";
-ws ::= #"[ \t\n\r]*";
+start::=thinking_block? user_start;
+thinking_block::='<think>' thinking_content '</think>' ws;
+thinking_content::=#'[^<]*';
+ws::=#'[ \\t\\n\\r]*';
 "#;
 
 /// Build a complete structural grammar based on features enabled.
@@ -115,7 +115,7 @@ pub fn build_structural_grammar(thinking_enabled: bool, tools_present: bool) -> 
         (false, true) => grammar.push_str(GRAMMAR_TOOLS_ONLY),
         (false, false) => {
             // No special structure needed - just allow any text
-            grammar.push_str("start ::= #\"[\\s\\S]*\";\n");
+            grammar.push_str("start::=#'[^\\x00]*';\n");
         }
     }
 
@@ -142,7 +142,9 @@ pub fn wrap_grammar_with_thinking(user_grammar: &str) -> String {
     // Rename user's start rule to user_start
     // This is a simple text replacement - production code might need
     // a proper parser for complex grammars
-    let renamed = user_grammar.replace("start ::=", "user_start ::=");
+    let renamed = user_grammar
+        .replace("start::=", "user_start::=")
+        .replace("start ::=", "user_start::=");
     wrapped.push_str(&renamed);
 
     wrapped
@@ -163,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_grammar_thinking_only_structure() {
-        assert!(GRAMMAR_THINKING_ONLY.contains("start ::="));
+        assert!(GRAMMAR_THINKING_ONLY.contains("start::="));
         assert!(GRAMMAR_THINKING_ONLY.contains("<think>"));
         assert!(GRAMMAR_THINKING_ONLY.contains("</think>"));
         assert!(GRAMMAR_THINKING_ONLY.contains("thinking_content"));
@@ -171,18 +173,18 @@ mod tests {
 
     #[test]
     fn test_grammar_tools_only_structure() {
-        assert!(GRAMMAR_TOOLS_ONLY.contains("start ::="));
+        assert!(GRAMMAR_TOOLS_ONLY.contains("start::="));
         assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_use>"));
         assert!(GRAMMAR_TOOLS_ONLY.contains("</tool_use>"));
         assert!(GRAMMAR_TOOLS_ONLY.contains("tool_json"));
-        // Check for escaped quotes in the grammar (\"name\" and \"input\")
-        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"\"name\""#));
-        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"\"input\""#));
+        // Check for JSON field names in the grammar
+        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"name"'"#));
+        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"input"'"#));
     }
 
     #[test]
     fn test_grammar_thinking_plus_tools_structure() {
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("start ::="));
+        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("start::="));
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<think>"));
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("</think>"));
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_use>"));
@@ -218,24 +220,24 @@ mod tests {
     fn test_build_structural_grammar_neither() {
         let grammar = build_structural_grammar(false, false);
         assert!(grammar.contains("json_object")); // From primitives
-        assert!(grammar.contains("start ::=")); // Has start rule
+        assert!(grammar.contains("start::=")); // Has start rule
         assert!(!grammar.contains("<think>"));
         assert!(!grammar.contains("<tool_use>"));
     }
 
     #[test]
     fn test_wrap_grammar_with_thinking() {
-        let user_grammar = r#"start ::= greeting;
-greeting ::= "Hello" | "Hi";"#;
+        let user_grammar = r#"start::=greeting;
+greeting::='Hello' | 'Hi';"#;
 
         let wrapped = wrap_grammar_with_thinking(user_grammar);
 
         // Should have new start rule from wrapper
-        assert!(wrapped.contains("start ::= [thinking_block] user_start"));
+        assert!(wrapped.contains("start::=thinking_block? user_start"));
         // User's start should be renamed
-        assert!(wrapped.contains("user_start ::= greeting"));
+        assert!(wrapped.contains("user_start::=greeting"));
         // User's other rules preserved
-        assert!(wrapped.contains("greeting ::="));
+        assert!(wrapped.contains("greeting::="));
     }
 
     #[test]

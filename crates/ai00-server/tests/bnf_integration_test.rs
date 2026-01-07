@@ -207,7 +207,7 @@ fn test_tokenizer_loads() {
 #[test]
 fn test_bnf_sampler_compiles_simple_grammar() {
     let tokenizer = load_tokenizer();
-    let grammar = r#"start ::= "yes" | "no";"#;
+    let grammar = r#"start::='yes' | 'no';"#;
 
     let result = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, grammar);
     assert!(result.is_ok(), "BnfSampler should compile simple grammar: {:?}", result.err());
@@ -216,7 +216,6 @@ fn test_bnf_sampler_compiles_simple_grammar() {
 /// Test BnfSampler compiles thinking grammar.
 /// Blocked by ninchat-bd2: KBNF grammar parsing errors with regex patterns.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: grammar parsing errors"]
 fn test_bnf_sampler_compiles_thinking_grammar() {
     let tokenizer = load_tokenizer();
     let grammar = format!("{}\n{}", GRAMMAR_JSON_PRIMITIVES, GRAMMAR_THINKING_ONLY);
@@ -228,7 +227,6 @@ fn test_bnf_sampler_compiles_thinking_grammar() {
 /// Test BnfSampler compiles tools grammar.
 /// Blocked by ninchat-bd2: KBNF grammar parsing errors with regex patterns.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: grammar parsing errors"]
 fn test_bnf_sampler_compiles_tools_grammar() {
     let tokenizer = load_tokenizer();
     let grammar = format!("{}\n{}", GRAMMAR_JSON_PRIMITIVES, GRAMMAR_TOOLS_ONLY);
@@ -240,7 +238,6 @@ fn test_bnf_sampler_compiles_tools_grammar() {
 /// Test BnfSampler compiles combined thinking+tools grammar.
 /// Blocked by ninchat-bd2: KBNF grammar parsing errors with regex patterns.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: grammar parsing errors"]
 fn test_bnf_sampler_compiles_combined_grammar() {
     let tokenizer = load_tokenizer();
     let grammar = format!("{}\n{}", GRAMMAR_JSON_PRIMITIVES, GRAMMAR_THINKING_PLUS_TOOLS);
@@ -252,7 +249,6 @@ fn test_bnf_sampler_compiles_combined_grammar() {
 /// Test BnfSampler compiles schema-aware grammar with tools.
 /// Blocked by ninchat-bd2: KBNF grammar parsing errors with regex patterns.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: grammar parsing errors"]
 fn test_bnf_sampler_compiles_schema_aware_grammar() {
     let tokenizer = load_tokenizer();
     let tools = vec![Tool {
@@ -281,10 +277,9 @@ fn test_bnf_sampler_compiles_schema_aware_grammar() {
 /// Test wrap_grammar_with_thinking compiles correctly.
 /// Blocked by ninchat-bd2: KBNF grammar parsing errors with regex patterns.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: grammar parsing errors"]
 fn test_bnf_sampler_compiles_wrapped_grammar() {
     let tokenizer = load_tokenizer();
-    let user_grammar = r#"start ::= "hello" | "world";"#;
+    let user_grammar = r#"start::='hello' | 'world';"#;
     let wrapped = wrap_grammar_with_thinking(user_grammar);
     let grammar = format!("{}\n{}", GRAMMAR_JSON_PRIMITIVES, wrapped);
 
@@ -299,12 +294,11 @@ fn test_bnf_sampler_compiles_wrapped_grammar() {
 /// Test that BnfSampler actually masks logits.
 /// Blocked by ninchat-bd2: All tokens being blocked, even for simple grammars.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: BNF masks all tokens"]
 fn test_bnf_sampler_masks_logits() {
     use ai00_core::sampler::Formatter;
 
     let tokenizer = load_tokenizer();
-    let grammar = r#"start ::= "yes";"#;
+    let grammar = r#"start::='yes';"#;
 
     let sampler = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, grammar)
         .expect("Should compile grammar");
@@ -347,13 +341,12 @@ fn test_bnf_sampler_masks_logits() {
 /// Test that BnfSampler allows correct initial tokens.
 /// Blocked by ninchat-bd2: All tokens being blocked, even for simple grammars.
 #[test]
-#[ignore = "Blocked by ninchat-bd2: BNF masks all tokens"]
 fn test_bnf_sampler_allows_valid_tokens() {
     use ai00_core::sampler::Formatter;
 
     let tokenizer = load_tokenizer();
     // Grammar that allows "Hello" or "Hi"
-    let grammar = r#"start ::= "Hello" | "Hi";"#;
+    let grammar = r#"start::='Hello' | 'Hi';"#;
 
     let sampler = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, grammar)
         .expect("Should compile grammar");
@@ -396,14 +389,13 @@ async fn test_model_generation_without_bnf() {
 /// Test generation with simple yes/no BNF constraint.
 /// Blocked by ninchat-bd2: BNF constrains block all tokens.
 #[tokio::test]
-#[ignore = "Blocked by ninchat-bd2: BNF masks all tokens"]
 async fn test_model_generation_with_yes_no_bnf() {
     let Some(model) = get_shared_model().await else {
         eprintln!("Model not found at {:?}, skipping test", model_path());
         return;
     };
 
-    let grammar = r#"start ::= "yes" | "no";"#;
+    let grammar = r#"start::='yes' | 'no';"#;
     let output = generate_with_bnf(
         &model.sender,
         &model.tokenizer,
@@ -425,19 +417,18 @@ async fn test_model_generation_with_yes_no_bnf() {
 /// Test generation with JSON BNF constraint.
 /// Blocked by ninchat-bd2: BNF constrains block all tokens.
 #[tokio::test]
-#[ignore = "Blocked by ninchat-bd2: BNF masks all tokens"]
 async fn test_model_generation_with_json_bnf() {
     let Some(model) = get_shared_model().await else {
         eprintln!("Model not found at {:?}, skipping test", model_path());
         return;
     };
 
-    // Simple JSON object grammar
+    // Simple JSON object grammar (kbnf syntax)
     let grammar = r#"
-start ::= "{" ws "\"name\"" ws ":" ws string ws "}";
-string ::= '"' chars '"';
-chars ::= #"[^\"]*";
-ws ::= #"[ \t\n\r]*";
+start::='{' ws '"name"' ws ':' ws string ws '}';
+string::='"' chars '"';
+chars::=#'[^"]*';
+ws::=#'[ \\t\\n\\r]*';
 "#;
 
     let output = generate_with_bnf(
@@ -464,9 +455,7 @@ ws ::= #"[ \t\n\r]*";
 }
 
 /// Test generation with thinking tags BNF.
-/// Note: This test is ignored until ninchat-bd2 (grammar parsing fix) is resolved.
 #[tokio::test]
-#[ignore = "Blocked by ninchat-bd2: grammar parsing errors"]
 async fn test_model_generation_with_thinking_bnf() {
     let Some(model) = get_shared_model().await else {
         eprintln!("Model not found at {:?}, skipping test", model_path());
@@ -494,7 +483,6 @@ async fn test_model_generation_with_thinking_bnf() {
 /// Test that BNF constraint actually restricts output.
 /// Blocked by ninchat-bd2: BNF constrains block all tokens.
 #[tokio::test]
-#[ignore = "Blocked by ninchat-bd2: BNF masks all tokens"]
 async fn test_bnf_actually_constrains_output() {
     let Some(model) = get_shared_model().await else {
         eprintln!("Model not found at {:?}, skipping test", model_path());
@@ -502,7 +490,7 @@ async fn test_bnf_actually_constrains_output() {
     };
 
     // Grammar that only allows numbers
-    let grammar = r#"start ::= #"[0-9]+";"#;
+    let grammar = r#"start::=#'[0-9]+';"#;
 
     let output = generate_with_bnf(
         &model.sender,
@@ -542,7 +530,7 @@ fn test_grammar_json_primitives_syntax() {
 fn test_build_structural_grammar_combinations() {
     // No features
     let grammar = build_structural_grammar(false, false);
-    assert!(grammar.contains("start ::="));
+    assert!(grammar.contains("start::="));
 
     // Thinking only
     let grammar = build_structural_grammar(true, false);
@@ -579,7 +567,7 @@ fn test_generate_tool_name_grammar_integration() {
     let grammar = generate_tool_name_grammar(&tools);
     assert!(grammar.contains("get_weather"));
     assert!(grammar.contains("search"));
-    assert!(grammar.contains("tool_name ::="));
+    assert!(grammar.contains("tool_name::="));
 }
 
 /// Test JSON Schema to KBNF conversion.
@@ -617,7 +605,7 @@ fn test_generate_tool_grammars_integration() {
     }];
 
     let grammar = generate_tool_grammars(&tools);
-    assert!(grammar.contains("tool_call ::="));
+    assert!(grammar.contains("tool_call::="));
     assert!(grammar.contains("calculator_call"));
     assert!(grammar.contains("calculator_input"));
 }
@@ -640,13 +628,13 @@ fn test_generate_schema_aware_grammar_integration() {
 
     // Without thinking
     let grammar = generate_schema_aware_grammar(&tools, false);
-    assert!(grammar.contains("start ::="));
-    assert!(grammar.contains("tool_call ::="));
+    assert!(grammar.contains("start::="));
+    assert!(grammar.contains("tool_call::="));
     assert!(!grammar.contains("<think>"));
 
     // With thinking
     let grammar = generate_schema_aware_grammar(&tools, true);
-    assert!(grammar.contains("start ::="));
-    assert!(grammar.contains("tool_call ::="));
+    assert!(grammar.contains("start::="));
+    assert!(grammar.contains("tool_call::="));
     assert!(grammar.contains("<think>"));
 }
