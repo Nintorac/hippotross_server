@@ -9,7 +9,10 @@ use tokio::sync::RwLock;
 
 use super::streaming::*;
 use super::tool_parser::ToolParser;
-use super::types::*;
+use super::types::{
+    generate_tool_system_prompt, ContentBlock, MessageParam, MessageRole, MessagesRequest,
+    MessagesResponse, StopReason, ThinkingConfig, Tool,
+};
 use crate::{
     api::{error::ApiErrorResponse, request_info},
     types::ThreadSender,
@@ -18,13 +21,27 @@ use crate::{
 
 use ai00_core::sampler::nucleus::{NucleusParams, NucleusSampler};
 
+/// RWKV end-of-text token for state initialization.
+/// Required at the start of prompts for proper model attention.
+const RWKV_EOT_TOKEN: &str = "<|rwkv_tokenizer_end_of_text|>";
+
 /// Build RWKV prompt from messages.
+///
+/// For thinking mode (RWKV 20250922+ models), the format is:
+/// ```text
+/// User: USER_PROMPT think
+///
+/// A: <think
+/// ```
+/// With variants "think a bit" (shorter) and "think a lot" (longer).
 fn build_prompt(
     system: Option<&str>,
     messages: &[MessageParam],
     tools: Option<&[Tool]>,
+    thinking: Option<&ThinkingConfig>,
 ) -> String {
-    let mut prompt = String::new();
+    // Start with RWKV EOT token for proper state initialization
+    let mut prompt = String::from(RWKV_EOT_TOKEN);
 
     // Add system prompt first (from top-level param, not message role)
     if let Some(sys) = system {
@@ -47,19 +64,50 @@ fn build_prompt(
         }
     }
 
-    // Format conversation
-    for msg in messages {
+    // Format conversation messages
+    let msg_count = messages.len();
+    for (i, msg) in messages.iter().enumerate() {
         let role = match msg.role {
             MessageRole::User => "User",
-            MessageRole::Assistant => "Assistant",
+            MessageRole::Assistant => "A",
         };
         let content = msg.content.to_text();
-        prompt.push_str(&format!("{}: {}\n\n", role, content));
+
+        // For the last user message when thinking is enabled, append think suffix
+        let is_last_user = i == msg_count - 1 && msg.role == MessageRole::User;
+        let think_suffix = if is_last_user {
+            get_thinking_suffix(thinking)
+        } else {
+            ""
+        };
+
+        prompt.push_str(&format!("{}: {}{}\n\n", role, content, think_suffix));
     }
 
     // Add assistant prefix for generation
-    prompt.push_str("Assistant:");
+    if thinking.map(|t| t.is_enabled()).unwrap_or(false) {
+        // Thinking mode: use "A: <think" prefix
+        prompt.push_str("A: <think");
+    } else {
+        prompt.push_str("A:");
+    }
+
     prompt
+}
+
+/// Get the thinking suffix to append to user message based on budget.
+fn get_thinking_suffix(thinking: Option<&ThinkingConfig>) -> &'static str {
+    match thinking {
+        Some(ThinkingConfig::Enabled { budget_tokens }) => {
+            // Map budget to thinking intensity
+            match *budget_tokens {
+                0..=4095 => " think a bit",      // Tier 1: shorter thinking
+                4096..=16383 => " think",        // Tier 2: standard thinking
+                _ => " think a lot",             // Tier 3+: extended thinking
+            }
+        }
+        _ => "",
+    }
 }
 
 /// Convert MessagesRequest to GenerateRequest.
@@ -68,6 +116,7 @@ fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
         req.system.as_deref(),
         &req.messages,
         req.tools.as_deref(),
+        req.thinking.as_ref(),
     );
 
     // Extract model text from previous assistant messages
