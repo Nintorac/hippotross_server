@@ -355,6 +355,129 @@ fn test_generate_tool_system_prompt_multiple_tools() {
     assert!(result.contains("Search the web"));
 }
 
+// =============================================================================
+// Tool Result Tests
+// =============================================================================
+
+/// Test tool_result content block parsing with string content.
+#[test]
+fn test_tool_result_string_content() {
+    let json = json!({
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_01abc123",
+                "content": "The weather in NYC is 72°F and sunny."
+            }
+        ]
+    });
+
+    let msg: MessageParam = serde_json::from_value(json).unwrap();
+    let text = msg.content.to_text();
+
+    assert!(text.contains("<tool_response>"));
+    assert!(text.contains("</tool_response>"));
+    assert!(text.contains("toolu_01abc123"));
+    assert!(text.contains("72°F"));
+}
+
+/// Test tool_result content block parsing with array content.
+#[test]
+fn test_tool_result_array_content() {
+    let json = json!({
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_02xyz789",
+                "content": [
+                    {"type": "text", "text": "Search results:"},
+                    {"type": "text", "text": "1. First result"}
+                ]
+            }
+        ]
+    });
+
+    let msg: MessageParam = serde_json::from_value(json).unwrap();
+    let text = msg.content.to_text();
+
+    assert!(text.contains("<tool_response>"));
+    assert!(text.contains("toolu_02xyz789"));
+    assert!(text.contains("Search results:"));
+    assert!(text.contains("First result"));
+}
+
+/// Test tool_result with is_error flag.
+#[test]
+fn test_tool_result_with_error() {
+    let json = json!({
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_03err456",
+                "content": "Error: API rate limit exceeded",
+                "is_error": true
+            }
+        ]
+    });
+
+    let msg: MessageParam = serde_json::from_value(json).unwrap();
+    let text = msg.content.to_text();
+
+    assert!(text.contains("<tool_response>"));
+    assert!(text.contains("\"is_error\":true"));
+    assert!(text.contains("rate limit"));
+}
+
+/// Test tool_use in assistant message formats as tool_call.
+#[test]
+fn test_tool_use_in_assistant_message() {
+    let json = json!({
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_04call789",
+                "name": "get_weather",
+                "input": {"location": "San Francisco"}
+            }
+        ]
+    });
+
+    let msg: MessageParam = serde_json::from_value(json).unwrap();
+    let text = msg.content.to_text();
+
+    assert!(text.contains("<tool_call>"));
+    assert!(text.contains("</tool_call>"));
+    assert!(text.contains("get_weather"));
+    assert!(text.contains("San Francisco"));
+}
+
+/// Test mixed content with text and tool_result.
+#[test]
+fn test_mixed_text_and_tool_result() {
+    let json = json!({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Here's the result:"},
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_05mix123",
+                "content": "42"
+            }
+        ]
+    });
+
+    let msg: MessageParam = serde_json::from_value(json).unwrap();
+    let text = msg.content.to_text();
+
+    assert!(text.contains("Here's the result:"));
+    assert!(text.contains("<tool_response>"));
+    assert!(text.contains("42"));
+}
+
 /// Test Tool::to_hermes_json formatting.
 #[test]
 fn test_tool_to_hermes_json() {
