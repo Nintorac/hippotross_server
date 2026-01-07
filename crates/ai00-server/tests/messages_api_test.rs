@@ -502,3 +502,147 @@ fn test_tool_to_hermes_json() {
     assert_eq!(json["function"]["description"], "Perform arithmetic calculations");
     assert!(json["function"]["parameters"]["properties"]["expression"].is_object());
 }
+
+// =============================================================================
+// ToolParser Integration Tests
+// =============================================================================
+
+use ai00_server::api::messages::ToolParser;
+
+/// Test ToolParser detects tool_call blocks.
+#[test]
+fn test_tool_parser_detects_tool_call() {
+    let mut parser = ToolParser::new();
+
+    let output = r#"Let me check the weather.
+<tool_call>
+{"name": "get_weather", "arguments": {"location": "NYC"}}
+</tool_call>"#;
+
+    let result = parser.feed(output);
+    let final_result = parser.finalize();
+
+    // Should have detected one tool use
+    assert!(parser.has_tool_use());
+    assert_eq!(parser.tool_count(), 1);
+
+    // Collect all tool uses
+    let mut tools: Vec<_> = result.tool_uses;
+    tools.extend(final_result.tool_uses);
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "get_weather");
+    assert_eq!(tools[0].input["location"], "NYC");
+
+    // Should have text content
+    let text = result.text.unwrap_or_default() + &final_result.text.unwrap_or_default();
+    assert!(text.contains("Let me check the weather"));
+}
+
+/// Test ToolParser with multiple tool calls.
+#[test]
+fn test_tool_parser_multiple_tool_calls() {
+    let mut parser = ToolParser::new();
+
+    let output = r#"<tool_call>
+{"name": "search", "arguments": {"query": "rust async"}}
+</tool_call>
+<tool_call>
+{"name": "calculate", "arguments": {"expr": "2+2"}}
+</tool_call>"#;
+
+    let result = parser.feed(output);
+    let final_result = parser.finalize();
+
+    // Should have detected two tool uses
+    assert_eq!(parser.tool_count(), 2);
+
+    let mut tools: Vec<_> = result.tool_uses;
+    tools.extend(final_result.tool_uses);
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0].name, "search");
+    assert_eq!(tools[1].name, "calculate");
+}
+
+/// Test full conversation flow with tool_use and tool_result.
+#[test]
+fn test_conversation_flow_with_tools() {
+    // First turn: user asks a question
+    let user_msg = json!({
+        "role": "user",
+        "content": "What's the weather in Paris?"
+    });
+    let user: MessageParam = serde_json::from_value(user_msg).unwrap();
+    assert_eq!(user.content.to_text(), "What's the weather in Paris?");
+
+    // Second turn: assistant responds with tool_use
+    let assistant_msg = json!({
+        "role": "assistant",
+        "content": [
+            {
+                "type": "text",
+                "text": "I'll check the weather for you."
+            },
+            {
+                "type": "tool_use",
+                "id": "toolu_01weather123",
+                "name": "get_weather",
+                "input": {"location": "Paris, France"}
+            }
+        ]
+    });
+    let assistant: MessageParam = serde_json::from_value(assistant_msg).unwrap();
+    let assistant_text = assistant.content.to_text();
+    assert!(assistant_text.contains("I'll check the weather"));
+    assert!(assistant_text.contains("<tool_call>"));
+    assert!(assistant_text.contains("get_weather"));
+
+    // Third turn: user provides tool_result
+    let user_result_msg = json!({
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_01weather123",
+                "content": "Weather in Paris: 18°C, Partly cloudy"
+            }
+        ]
+    });
+    let user_result: MessageParam = serde_json::from_value(user_result_msg).unwrap();
+    let result_text = user_result.content.to_text();
+    assert!(result_text.contains("<tool_response>"));
+    assert!(result_text.contains("toolu_01weather123"));
+    assert!(result_text.contains("18°C"));
+}
+
+/// Test StopReason::ToolUse is correctly serialized.
+#[test]
+fn test_stop_reason_tool_use_serialization() {
+    let reason = StopReason::ToolUse;
+    let json = serde_json::to_value(reason).unwrap();
+    assert_eq!(json, "tool_use");
+}
+
+/// Test response with tool_use content blocks.
+#[test]
+fn test_response_with_tool_use_content() {
+    let content = vec![
+        ContentBlock::Text {
+            text: "Let me search for that.".to_string(),
+        },
+        ContentBlock::ToolUse {
+            id: "toolu_abc123".to_string(),
+            name: "web_search".to_string(),
+            input: json!({"query": "Rust programming"}),
+        },
+    ];
+
+    let response = MessagesResponse::new("test-model".to_string(), content, Default::default())
+        .with_stop_reason(StopReason::ToolUse);
+
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(json["stop_reason"], "tool_use");
+    assert_eq!(json["content"].as_array().unwrap().len(), 2);
+    assert_eq!(json["content"][0]["type"], "text");
+    assert_eq!(json["content"][1]["type"], "tool_use");
+    assert_eq!(json["content"][1]["name"], "web_search");
+}
