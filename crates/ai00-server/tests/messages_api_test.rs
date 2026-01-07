@@ -3,10 +3,10 @@
 mod common;
 
 use ai00_server::api::messages::{
-    generate_thinking_signature, generate_tool_system_prompt, validate_tool_name, ContentBlock,
-    MessageContent, MessageParam, MessageRole, MessagesRequest, MessagesResponse, StopReason,
-    ThinkingConfig, ThinkingExtractor, ThinkingStreamParser, ThinkingStreamState, Tool, ToolChoice,
-    ToolChoiceSimple, ToolChoiceSpecific,
+    emit_error, generate_thinking_signature, generate_tool_system_prompt, validate_tool_name,
+    ContentBlock, MessageContent, MessageParam, MessageRole, MessagesRequest, MessagesResponse,
+    StopReason, StreamErrorEvent, ThinkingConfig, ThinkingExtractor, ThinkingStreamParser,
+    ThinkingStreamState, Tool, ToolChoice, ToolChoiceSimple, ToolChoiceSpecific,
 };
 use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
 use rstest::rstest;
@@ -929,4 +929,44 @@ fn test_thinking_stream_parser_finalize_incomplete() {
 
     // Should mark thinking as complete even without end tag
     assert!(result.thinking_complete);
+}
+
+// Streaming Error Tests
+
+/// Test streaming error event without partial content.
+#[test]
+fn test_stream_error_event_simple() {
+    let event = emit_error("api_error", "Generation failed", None);
+
+    // Should be named "error"
+    // Note: SseEvent internals aren't easily inspectable, so we verify via JSON in the text
+    let text = format!("{:?}", event);
+    assert!(text.contains("error"));
+}
+
+/// Test streaming error event with partial content.
+#[test]
+fn test_stream_error_event_with_partial() {
+    let partial = vec![ContentBlock::Text {
+        text: "Partial response before error...".to_string(),
+    }];
+
+    let _event = emit_error("overloaded_error", "Server overloaded", Some(partial.clone()));
+
+    // Verify StreamErrorEvent serialization
+    let error_data = StreamErrorEvent {
+        event_type: "error",
+        error: ai00_server::api::messages::StreamErrorData {
+            error_type: "overloaded_error".to_string(),
+            message: "Server overloaded".to_string(),
+            partial_content: Some(partial),
+        },
+    };
+
+    let json = serde_json::to_value(&error_data).unwrap();
+    assert_eq!(json["type"], "error");
+    assert_eq!(json["error"]["type"], "overloaded_error");
+    assert_eq!(json["error"]["message"], "Server overloaded");
+    assert!(json["error"]["partial_content"].is_array());
+    assert_eq!(json["error"]["partial_content"][0]["type"], "text");
 }

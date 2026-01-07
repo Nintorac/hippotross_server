@@ -282,3 +282,39 @@ pub fn emit_ping() -> SseEvent {
         .name("ping")
         .text(serde_json::to_string(&event).unwrap())
 }
+
+/// error event - reports streaming error with optional partial content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamErrorEvent {
+    #[serde(rename = "type")]
+    pub event_type: &'static str,
+    pub error: StreamErrorData,
+}
+
+/// Error data for streaming error event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamErrorData {
+    /// Error type (e.g., "api_error", "overloaded_error")
+    #[serde(rename = "type")]
+    pub error_type: String,
+    /// Human-readable error message
+    pub message: String,
+    /// Partial content blocks accumulated before error (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_content: Option<Vec<ContentBlock>>,
+}
+
+/// Create an error SSE event with optional partial content.
+pub fn emit_error(error_type: &str, message: &str, partial_content: Option<Vec<ContentBlock>>) -> SseEvent {
+    let event = StreamErrorEvent {
+        event_type: "error",
+        error: StreamErrorData {
+            error_type: error_type.to_string(),
+            message: message.to_string(),
+            partial_content,
+        },
+    };
+    SseEvent::default()
+        .name("error")
+        .text(serde_json::to_string(&event).unwrap())
+}

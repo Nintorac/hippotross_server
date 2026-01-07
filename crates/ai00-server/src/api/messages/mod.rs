@@ -10,6 +10,7 @@ mod tool_parser;
 mod types;
 
 pub use handler::messages_handler;
+pub use streaming::{emit_error, StreamErrorData, StreamErrorEvent};
 pub use thinking_extractor::{
     generate_thinking_signature, ThinkingExtractor, ThinkingResult, ThinkingStreamParser,
     ThinkingStreamResult, ThinkingStreamState,
