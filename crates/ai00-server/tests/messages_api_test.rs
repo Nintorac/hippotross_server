@@ -1203,3 +1203,272 @@ fn test_bnf_schema_and_validation_together() {
     assert_eq!(request.bnf_schema.as_deref(), Some("start ::= \"hello\""));
     assert_eq!(request.bnf_validation, Some(BnfValidationLevel::Structural));
 }
+
+// =============================================================================
+// BNF Grammar Generation Integration Tests
+// =============================================================================
+
+use ai00_server::api::messages::bnf_generator::generate_bnf_schema;
+use ai00_server::api::messages::bnf_grammars::{
+    build_structural_grammar, GRAMMAR_JSON_PRIMITIVES, GRAMMAR_THINKING_ONLY,
+    GRAMMAR_THINKING_PLUS_TOOLS, GRAMMAR_TOOLS_ONLY,
+};
+
+/// Test that generate_bnf_schema returns None for None level.
+#[test]
+fn test_integration_generate_bnf_schema_none_level() {
+    let result = generate_bnf_schema(None, false, BnfValidationLevel::None);
+    assert!(result.is_none());
+
+    let result = generate_bnf_schema(None, true, BnfValidationLevel::None);
+    assert!(result.is_none());
+}
+
+/// Test Structural level generates thinking-only grammar.
+#[test]
+fn test_integration_structural_thinking_only() {
+    let result = generate_bnf_schema(None, true, BnfValidationLevel::Structural);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+    // Should contain thinking tags
+    assert!(grammar.contains("<think>"));
+    assert!(grammar.contains("</think>"));
+    // Should NOT contain tool tags
+    assert!(!grammar.contains("<tool_use>"));
+    // Should contain JSON primitives
+    assert!(grammar.contains("json_object"));
+}
+
+/// Test Structural level generates tools-only grammar.
+#[test]
+fn test_integration_structural_tools_only() {
+    let tools = vec![Tool {
+        name: "test_tool".to_string(),
+        description: Some("Test description".to_string()),
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    }];
+
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::Structural);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+    // Should contain tool tags
+    assert!(grammar.contains("<tool_use>"));
+    assert!(grammar.contains("</tool_use>"));
+    // Should NOT contain thinking tags
+    assert!(!grammar.contains("<think>"));
+}
+
+/// Test Structural level generates combined grammar for thinking + tools.
+#[test]
+fn test_integration_structural_thinking_and_tools() {
+    let tools = vec![Tool {
+        name: "test_tool".to_string(),
+        description: Some("Test description".to_string()),
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    }];
+
+    let result = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::Structural);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+    // Should contain both thinking and tool tags
+    assert!(grammar.contains("<think>"));
+    assert!(grammar.contains("<tool_use>"));
+}
+
+/// Test SchemaAware level generates tool-specific grammars.
+#[test]
+fn test_integration_schema_aware_with_tools() {
+    let tools = vec![Tool {
+        name: "get_weather".to_string(),
+        description: Some("Get weather for a location".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"},
+                "units": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"]
+                }
+            },
+            "required": ["location"]
+        }),
+        cache_control: None,
+    }];
+
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+
+    // Should have tool-specific rules
+    assert!(grammar.contains("get_weather_call"));
+    assert!(grammar.contains("get_weather_input"));
+
+    // Should have tool dispatch rule
+    assert!(grammar.contains("tool_call ::="));
+
+    // Should have enum values from schema
+    assert!(grammar.contains("celsius") || grammar.contains("fahrenheit"));
+}
+
+/// Test SchemaAware with multiple tools generates dispatch rule.
+#[test]
+fn test_integration_schema_aware_multiple_tools() {
+    let tools = vec![
+        Tool {
+            name: "get_weather".to_string(),
+            description: Some("Get weather".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"]
+            }),
+            cache_control: None,
+        },
+        Tool {
+            name: "search".to_string(),
+            description: Some("Search the web".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"]
+            }),
+            cache_control: None,
+        },
+    ];
+
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+
+    // Should have both tool-specific rules
+    assert!(grammar.contains("get_weather_call"));
+    assert!(grammar.contains("search_call"));
+
+    // Dispatch rule should have alternation
+    assert!(grammar.contains("tool_call ::="));
+    assert!(grammar.contains(" | "));
+}
+
+/// Test SchemaAware with thinking enabled includes thinking block.
+#[test]
+fn test_integration_schema_aware_with_thinking() {
+    let tools = vec![Tool {
+        name: "test_tool".to_string(),
+        description: Some("Test".to_string()),
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    }];
+
+    let result = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::SchemaAware);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+
+    // Should have thinking block
+    assert!(grammar.contains("thinking_block"));
+    assert!(grammar.contains("<think>"));
+
+    // Should also have tool rules
+    assert!(grammar.contains("test_tool_call"));
+}
+
+/// Test grammar constants are valid KBNF.
+#[test]
+fn test_integration_grammar_constants_structure() {
+    // Each constant should have rule definitions (::=) and semicolons
+    assert!(GRAMMAR_JSON_PRIMITIVES.contains("::="));
+    assert!(GRAMMAR_JSON_PRIMITIVES.contains(";"));
+
+    assert!(GRAMMAR_THINKING_ONLY.contains("::="));
+    assert!(GRAMMAR_THINKING_ONLY.contains("<think>"));
+
+    assert!(GRAMMAR_TOOLS_ONLY.contains("::="));
+    assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_use>"));
+
+    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("::="));
+    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<think>"));
+    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_use>"));
+}
+
+/// Test build_structural_grammar helper.
+#[test]
+fn test_integration_build_structural_grammar() {
+    // No features - should still have start rule
+    let grammar = build_structural_grammar(false, false);
+    assert!(grammar.contains("start ::="));
+    assert!(grammar.contains("json_object"));
+
+    // Thinking only
+    let grammar = build_structural_grammar(true, false);
+    assert!(grammar.contains("<think>"));
+    assert!(!grammar.contains("<tool_use>"));
+
+    // Tools only
+    let grammar = build_structural_grammar(false, true);
+    assert!(grammar.contains("<tool_use>"));
+    assert!(!grammar.contains("<think>"));
+
+    // Both
+    let grammar = build_structural_grammar(true, true);
+    assert!(grammar.contains("<think>"));
+    assert!(grammar.contains("<tool_use>"));
+}
+
+/// Test grammar generation with complex nested schema.
+#[test]
+fn test_integration_schema_aware_nested_schema() {
+    let tools = vec![Tool {
+        name: "create_user".to_string(),
+        description: Some("Create a user".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "email": {"type": "string"},
+                        "age": {"type": "integer"}
+                    },
+                    "required": ["name", "email"]
+                },
+                "notify": {"type": "boolean"}
+            },
+            "required": ["user"]
+        }),
+        cache_control: None,
+    }];
+
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+
+    // Should handle nested object
+    assert!(grammar.contains("create_user_input"));
+    // Should have property references
+    assert!(grammar.contains("user") || grammar.contains("name") || grammar.contains("email"));
+}
+
+/// Test SchemaAware fallback when no tools provided.
+#[test]
+fn test_integration_schema_aware_no_tools_fallback() {
+    // No tools, but thinking enabled - should fall back to thinking-only
+    let result = generate_bnf_schema(None, true, BnfValidationLevel::SchemaAware);
+    assert!(result.is_some());
+
+    let grammar = result.unwrap();
+    assert!(grammar.contains("<think>"));
+    assert!(!grammar.contains("tool_call"));
+
+    // No tools, no thinking - should return None
+    let result = generate_bnf_schema(None, false, BnfValidationLevel::SchemaAware);
+    assert!(result.is_none());
+}
