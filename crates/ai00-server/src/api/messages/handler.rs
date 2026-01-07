@@ -8,6 +8,7 @@ use salvo::{oapi::extract::JsonBody, prelude::*, sse::SseEvent};
 use tokio::sync::RwLock;
 
 use super::streaming::*;
+use super::tool_parser::ToolParser;
 use super::types::*;
 use crate::{
     api::{error::ApiErrorResponse, request_info},
@@ -265,45 +266,233 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
         .sum::<usize>()
         + request.system.as_ref().map(|s| s.len() / 4).unwrap_or(0);
 
+    // Check if tools are enabled
+    let has_tools = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+
+    if has_tools {
+        // Use tool-aware streaming with ToolParser
+        respond_stream_with_tools(
+            res,
+            token_receiver,
+            message_id,
+            model_name,
+            input_tokens,
+        )
+        .await;
+    } else {
+        // Simple streaming without tool parsing
+        respond_stream_simple(res, token_receiver, message_id, model_name, input_tokens).await;
+    }
+}
+
+/// Simple streaming handler without tool parsing.
+async fn respond_stream_simple(
+    res: &mut Response,
+    token_receiver: flume::Receiver<Token>,
+    message_id: String,
+    model_name: String,
+    input_tokens: usize,
+) {
     let mut output_tokens = 0usize;
     let mut start_token = true;
 
-    let stream = token_receiver.into_stream().map(move |token| -> Result<SseEvent, std::convert::Infallible> {
+    let stream =
+        token_receiver
+            .into_stream()
+            .map(move |token| -> Result<SseEvent, std::convert::Infallible> {
+                match token {
+                    Token::Start => Ok(emit_message_start(
+                        message_id.clone(),
+                        model_name.clone(),
+                        input_tokens,
+                    )),
+                    Token::Content(text) => {
+                        output_tokens += 1;
+
+                        if start_token {
+                            start_token = false;
+                            let trimmed = text.trim_start().to_string();
+                            if trimmed.is_empty() {
+                                return Ok(emit_content_block_start_text(0));
+                            }
+                            return Ok(emit_text_delta(0, trimmed));
+                        }
+
+                        if text.is_empty() {
+                            Ok(emit_ping())
+                        } else {
+                            Ok(emit_text_delta(0, text))
+                        }
+                    }
+                    Token::Stop(reason, _counter) => {
+                        let stop_reason: StopReason = reason.into();
+                        Ok(emit_message_delta(stop_reason, output_tokens))
+                    }
+                    Token::Done => Ok(emit_message_stop()),
+                    _ => Ok(emit_ping()),
+                }
+            });
+
+    salvo::sse::stream(res, stream);
+}
+
+/// Streaming handler with tool parsing.
+/// Detects <tool_call> blocks and emits tool_use content blocks.
+async fn respond_stream_with_tools(
+    res: &mut Response,
+    token_receiver: flume::Receiver<Token>,
+    message_id: String,
+    model_name: String,
+    input_tokens: usize,
+) {
+    use std::cell::RefCell;
+
+    // Shared state for the streaming handler
+    struct StreamState {
+        parser: ToolParser,
+        output_tokens: usize,
+        content_block_index: usize,
+        text_block_started: bool,
+        message_started: bool,
+    }
+
+    let state = RefCell::new(StreamState {
+        parser: ToolParser::new(),
+        output_tokens: 0,
+        content_block_index: 0,
+        text_block_started: false,
+        message_started: false,
+    });
+
+    let stream = token_receiver.into_stream().flat_map(move |token| {
+        let mut events: Vec<Result<SseEvent, std::convert::Infallible>> = Vec::new();
+        let mut state = state.borrow_mut();
+
         match token {
             Token::Start => {
-                // Emit message_start event
-                Ok(emit_message_start(message_id.clone(), model_name.clone(), input_tokens))
+                state.message_started = true;
+                events.push(Ok(emit_message_start(
+                    message_id.clone(),
+                    model_name.clone(),
+                    input_tokens,
+                )));
             }
             Token::Content(text) => {
-                output_tokens += 1;
+                state.output_tokens += 1;
 
-                // On first content, emit content_block_start if we haven't
-                if start_token {
-                    start_token = false;
-                    let trimmed = text.trim_start().to_string();
-                    if trimmed.is_empty() {
-                        return Ok(emit_content_block_start_text(0));
+                // Feed token to parser
+                let result = state.parser.feed(&text);
+
+                // Emit text content if any
+                if let Some(text_content) = result.text {
+                    if !text_content.is_empty() {
+                        // Start text block if needed
+                        if !state.text_block_started {
+                            events.push(Ok(emit_content_block_start_text(
+                                state.content_block_index,
+                            )));
+                            state.text_block_started = true;
+                        }
+                        events.push(Ok(emit_text_delta(
+                            state.content_block_index,
+                            text_content,
+                        )));
                     }
-                    // For first non-empty token, we'd ideally emit both start and delta
-                    // but SSE is one event at a time, so just emit the delta
-                    return Ok(emit_text_delta(0, trimmed));
                 }
 
-                if text.is_empty() {
-                    Ok(emit_ping())
-                } else {
-                    Ok(emit_text_delta(0, text))
+                // Emit completed tool uses
+                for tool_use in result.tool_uses {
+                    // Close text block if open
+                    if state.text_block_started {
+                        events.push(Ok(emit_content_block_stop(state.content_block_index)));
+                        state.content_block_index += 1;
+                        state.text_block_started = false;
+                    }
+
+                    // Emit tool_use block
+                    events.push(Ok(emit_content_block_start_tool_use(
+                        state.content_block_index,
+                        tool_use.id,
+                        tool_use.name,
+                    )));
+
+                    // Emit the input JSON as a single delta
+                    let input_json = serde_json::to_string(&tool_use.input).unwrap_or_default();
+                    events.push(Ok(emit_input_json_delta(
+                        state.content_block_index,
+                        input_json,
+                    )));
+
+                    // Close tool_use block
+                    events.push(Ok(emit_content_block_stop(state.content_block_index)));
+                    state.content_block_index += 1;
                 }
             }
             Token::Stop(reason, _counter) => {
-                let stop_reason: StopReason = reason.into();
-                Ok(emit_message_delta(stop_reason, output_tokens))
+                // Finalize parser
+                let final_result = state.parser.finalize();
+
+                // Emit any remaining text
+                if let Some(text_content) = final_result.text {
+                    if !text_content.is_empty() {
+                        if !state.text_block_started {
+                            events.push(Ok(emit_content_block_start_text(
+                                state.content_block_index,
+                            )));
+                            state.text_block_started = true;
+                        }
+                        events.push(Ok(emit_text_delta(
+                            state.content_block_index,
+                            text_content,
+                        )));
+                    }
+                }
+
+                // Emit any remaining tool uses
+                for tool_use in final_result.tool_uses {
+                    if state.text_block_started {
+                        events.push(Ok(emit_content_block_stop(state.content_block_index)));
+                        state.content_block_index += 1;
+                        state.text_block_started = false;
+                    }
+
+                    events.push(Ok(emit_content_block_start_tool_use(
+                        state.content_block_index,
+                        tool_use.id,
+                        tool_use.name,
+                    )));
+                    let input_json = serde_json::to_string(&tool_use.input).unwrap_or_default();
+                    events.push(Ok(emit_input_json_delta(
+                        state.content_block_index,
+                        input_json,
+                    )));
+                    events.push(Ok(emit_content_block_stop(state.content_block_index)));
+                    state.content_block_index += 1;
+                }
+
+                // Close any open text block
+                if state.text_block_started {
+                    events.push(Ok(emit_content_block_stop(state.content_block_index)));
+                }
+
+                // Determine stop reason
+                let stop_reason = if state.parser.has_tool_use() {
+                    StopReason::ToolUse
+                } else {
+                    reason.into()
+                };
+
+                events.push(Ok(emit_message_delta(stop_reason, state.output_tokens)));
             }
             Token::Done => {
-                Ok(emit_message_stop())
+                events.push(Ok(emit_message_stop()));
             }
-            _ => Ok(emit_ping()),
+            _ => {
+                events.push(Ok(emit_ping()));
+            }
         }
+
+        futures_util::stream::iter(events)
     });
 
     salvo::sse::stream(res, stream);

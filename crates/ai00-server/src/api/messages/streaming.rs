@@ -154,12 +154,44 @@ pub fn emit_content_block_start_text(index: usize) -> SseEvent {
         .text(serde_json::to_string(&event).unwrap())
 }
 
+/// Create a content_block_start SSE event for tool_use.
+pub fn emit_content_block_start_tool_use(
+    index: usize,
+    id: String,
+    name: String,
+) -> SseEvent {
+    let event = ContentBlockStartEvent {
+        event_type: "content_block_start",
+        index,
+        content_block: ContentBlock::ToolUse {
+            id,
+            name,
+            input: serde_json::Value::Object(Default::default()),
+        },
+    };
+    SseEvent::default()
+        .name("content_block_start")
+        .text(serde_json::to_string(&event).unwrap())
+}
+
 /// Create a content_block_delta SSE event for text.
 pub fn emit_text_delta(index: usize, text: String) -> SseEvent {
     let event = ContentBlockDeltaEvent {
         event_type: "content_block_delta",
         index,
         delta: ContentDelta::TextDelta { text },
+    };
+    SseEvent::default()
+        .name("content_block_delta")
+        .text(serde_json::to_string(&event).unwrap())
+}
+
+/// Create a content_block_delta SSE event for tool input JSON.
+pub fn emit_input_json_delta(index: usize, partial_json: String) -> SseEvent {
+    let event = ContentBlockDeltaEvent {
+        event_type: "content_block_delta",
+        index,
+        delta: ContentDelta::InputJsonDelta { partial_json },
     };
     SseEvent::default()
         .name("content_block_delta")
