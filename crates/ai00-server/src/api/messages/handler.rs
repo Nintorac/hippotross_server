@@ -85,10 +85,28 @@ fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
 
 /// Validate the messages request.
 fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
+    // Validate model is provided
+    if req.model.is_empty() {
+        return Err(
+            ApiErrorResponse::invalid_request("model is required")
+                .with_param("model"),
+        );
+    }
+
+    // Validate messages array
     if req.messages.is_empty() {
         return Err(ApiErrorResponse::invalid_request("messages cannot be empty"));
     }
 
+    // First message must be from user (Claude API requirement)
+    if req.messages.first().map(|m| m.role) != Some(MessageRole::User) {
+        return Err(
+            ApiErrorResponse::invalid_request("first message must have role 'user'")
+                .with_param("messages.0.role"),
+        );
+    }
+
+    // Validate max_tokens
     if req.max_tokens == 0 {
         return Err(
             ApiErrorResponse::invalid_request("max_tokens must be greater than 0")
@@ -96,6 +114,7 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
         );
     }
 
+    // Validate temperature range
     if let Some(temp) = req.temperature {
         if !(0.0..=2.0).contains(&temp) {
             return Err(
@@ -105,12 +124,41 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
         }
     }
 
+    // Validate top_p range
     if let Some(top_p) = req.top_p {
         if !(0.0..=1.0).contains(&top_p) {
             return Err(
                 ApiErrorResponse::invalid_request("top_p must be between 0.0 and 1.0")
                     .with_param("top_p"),
             );
+        }
+    }
+
+    // Validate top_k if provided
+    if let Some(top_k) = req.top_k {
+        if top_k == 0 {
+            return Err(
+                ApiErrorResponse::invalid_request("top_k must be greater than 0")
+                    .with_param("top_k"),
+            );
+        }
+    }
+
+    // Validate stop_sequences if provided
+    if let Some(ref stop_seqs) = req.stop_sequences {
+        if stop_seqs.len() > 8 {
+            return Err(
+                ApiErrorResponse::invalid_request("stop_sequences cannot have more than 8 items")
+                    .with_param("stop_sequences"),
+            );
+        }
+        for (i, seq) in stop_seqs.iter().enumerate() {
+            if seq.is_empty() {
+                return Err(
+                    ApiErrorResponse::invalid_request("stop_sequences cannot contain empty strings")
+                        .with_param(format!("stop_sequences.{}", i)),
+                );
+            }
         }
     }
 
