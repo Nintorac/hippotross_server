@@ -3,8 +3,9 @@
 mod common;
 
 use ai00_server::api::messages::{
-    validate_tool_name, ContentBlock, MessageContent, MessageParam, MessageRole, MessagesRequest,
-    MessagesResponse, StopReason, Tool, ToolChoice, ToolChoiceSimple, ToolChoiceSpecific,
+    generate_tool_system_prompt, validate_tool_name, ContentBlock, MessageContent, MessageParam,
+    MessageRole, MessagesRequest, MessagesResponse, StopReason, Tool, ToolChoice, ToolChoiceSimple,
+    ToolChoiceSpecific,
 };
 use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
 use rstest::rstest;
@@ -284,4 +285,101 @@ fn test_tool_choice_specific_new() {
     assert_eq!(choice.choice_type, "tool");
     assert_eq!(choice.name, "my_tool");
     assert!(choice.disable_parallel_tool_use.is_none());
+}
+
+// =============================================================================
+// Tool Prompt Injection Tests
+// =============================================================================
+
+/// Test generate_tool_system_prompt with empty tools.
+#[test]
+fn test_generate_tool_system_prompt_empty() {
+    let result = generate_tool_system_prompt(&[]);
+    assert!(result.is_empty());
+}
+
+/// Test generate_tool_system_prompt with a single tool.
+#[test]
+fn test_generate_tool_system_prompt_single_tool() {
+    let tools = vec![Tool {
+        name: "get_weather".to_string(),
+        description: Some("Get the current weather for a location".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"}
+            }
+        }),
+        cache_control: None,
+    }];
+
+    let result = generate_tool_system_prompt(&tools);
+
+    // Should contain the tool instruction header
+    assert!(result.contains("Available Tools"));
+    assert!(result.contains("<tool_use>"));
+    assert!(result.contains("<name>"));
+    assert!(result.contains("<input>"));
+
+    // Should contain the tool name and description
+    assert!(result.contains("get_weather"));
+    assert!(result.contains("Get the current weather for a location"));
+
+    // Should contain the schema
+    assert!(result.contains("location"));
+}
+
+/// Test generate_tool_system_prompt with multiple tools.
+#[test]
+fn test_generate_tool_system_prompt_multiple_tools() {
+    let tools = vec![
+        Tool {
+            name: "get_weather".to_string(),
+            description: Some("Get weather".to_string()),
+            input_schema: json!({"type": "object"}),
+            cache_control: None,
+        },
+        Tool {
+            name: "search_web".to_string(),
+            description: Some("Search the web".to_string()),
+            input_schema: json!({"type": "object"}),
+            cache_control: None,
+        },
+    ];
+
+    let result = generate_tool_system_prompt(&tools);
+
+    // Should contain both tools
+    assert!(result.contains("get_weather"));
+    assert!(result.contains("search_web"));
+    assert!(result.contains("Get weather"));
+    assert!(result.contains("Search the web"));
+}
+
+/// Test Tool::to_markdown formatting.
+#[test]
+fn test_tool_to_markdown() {
+    let tool = Tool {
+        name: "calculate".to_string(),
+        description: Some("Perform arithmetic calculations".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string"}
+            },
+            "required": ["expression"]
+        }),
+        cache_control: None,
+    };
+
+    let md = tool.to_markdown();
+
+    // Should have header with tool name
+    assert!(md.contains("### calculate"));
+    // Should have description
+    assert!(md.contains("Perform arithmetic calculations"));
+    // Should have input schema section
+    assert!(md.contains("**Input Schema:**"));
+    assert!(md.contains("```json"));
+    assert!(md.contains("expression"));
 }
