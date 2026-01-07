@@ -322,6 +322,79 @@ pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
     prompt
 }
 
+/// Configuration for extended thinking (reasoning traces).
+///
+/// When enabled, the model will output its reasoning process in
+/// `thinking` content blocks before providing the final response.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type")]
+pub enum ThinkingConfig {
+    /// Enable extended thinking with a token budget.
+    #[serde(rename = "enabled")]
+    Enabled {
+        /// Maximum tokens for thinking output (minimum 1024).
+        budget_tokens: usize,
+    },
+    /// Disable extended thinking.
+    #[serde(rename = "disabled")]
+    Disabled,
+}
+
+impl ThinkingConfig {
+    /// Check if thinking is enabled.
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, ThinkingConfig::Enabled { .. })
+    }
+
+    /// Get the budget tokens if enabled.
+    pub fn budget_tokens(&self) -> Option<usize> {
+        match self {
+            ThinkingConfig::Enabled { budget_tokens } => Some(*budget_tokens),
+            ThinkingConfig::Disabled => None,
+        }
+    }
+
+    /// Validate the thinking configuration.
+    ///
+    /// Returns an error if budget_tokens < 1024 or budget_tokens >= max_tokens.
+    pub fn validate(&self, max_tokens: usize) -> Result<(), &'static str> {
+        match self {
+            ThinkingConfig::Enabled { budget_tokens } => {
+                if *budget_tokens < 1024 {
+                    return Err("budget_tokens must be at least 1024");
+                }
+                if *budget_tokens >= max_tokens {
+                    return Err("budget_tokens must be less than max_tokens");
+                }
+                Ok(())
+            }
+            ThinkingConfig::Disabled => Ok(()),
+        }
+    }
+
+    /// Map budget_tokens to internal thinking tier.
+    ///
+    /// Returns a tier from 1-4 based on the budget:
+    /// - Tier 1: 1024-4095 tokens (quick reasoning)
+    /// - Tier 2: 4096-16383 tokens (moderate reasoning)
+    /// - Tier 3: 16384-65535 tokens (extended reasoning)
+    /// - Tier 4: 65536+ tokens (maximum reasoning)
+    pub fn thinking_tier(&self) -> Option<u8> {
+        match self {
+            ThinkingConfig::Enabled { budget_tokens } => {
+                let tier = match *budget_tokens {
+                    0..=4095 => 1,
+                    4096..=16383 => 2,
+                    16384..=65535 => 3,
+                    _ => 4,
+                };
+                Some(tier)
+            }
+            ThinkingConfig::Disabled => None,
+        }
+    }
+}
+
 /// How the model should choose which tool to use.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
@@ -418,6 +491,10 @@ pub struct MessagesRequest {
     /// How the model should choose which tool to use
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
+
+    /// Extended thinking configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
 
     /// Metadata for request tracking (forward compatibility - ignored)
     #[serde(default, skip_serializing_if = "Option::is_none")]

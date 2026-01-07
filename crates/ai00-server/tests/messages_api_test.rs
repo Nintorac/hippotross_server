@@ -4,8 +4,8 @@ mod common;
 
 use ai00_server::api::messages::{
     generate_tool_system_prompt, validate_tool_name, ContentBlock, MessageContent, MessageParam,
-    MessageRole, MessagesRequest, MessagesResponse, StopReason, Tool, ToolChoice, ToolChoiceSimple,
-    ToolChoiceSpecific,
+    MessageRole, MessagesRequest, MessagesResponse, StopReason, ThinkingConfig, Tool, ToolChoice,
+    ToolChoiceSimple, ToolChoiceSpecific,
 };
 use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
 use rstest::rstest;
@@ -645,4 +645,101 @@ fn test_response_with_tool_use_content() {
     assert_eq!(json["content"][0]["type"], "text");
     assert_eq!(json["content"][1]["type"], "tool_use");
     assert_eq!(json["content"][1]["name"], "web_search");
+}
+
+// =============================================================================
+// ThinkingConfig Tests
+// =============================================================================
+
+/// Test ThinkingConfig enabled deserialization.
+#[test]
+fn test_thinking_config_enabled_deserialization() {
+    let json = json!({
+        "type": "enabled",
+        "budget_tokens": 10000
+    });
+
+    let config: ThinkingConfig = serde_json::from_value(json).unwrap();
+    assert!(config.is_enabled());
+    assert_eq!(config.budget_tokens(), Some(10000));
+}
+
+/// Test ThinkingConfig disabled deserialization.
+#[test]
+fn test_thinking_config_disabled_deserialization() {
+    let json = json!({
+        "type": "disabled"
+    });
+
+    let config: ThinkingConfig = serde_json::from_value(json).unwrap();
+    assert!(!config.is_enabled());
+    assert_eq!(config.budget_tokens(), None);
+}
+
+/// Test ThinkingConfig validation.
+#[test]
+fn test_thinking_config_validation() {
+    // Valid configuration
+    let config = ThinkingConfig::Enabled {
+        budget_tokens: 5000,
+    };
+    assert!(config.validate(10000).is_ok());
+
+    // budget_tokens too low
+    let config = ThinkingConfig::Enabled { budget_tokens: 500 };
+    assert!(config.validate(10000).is_err());
+
+    // budget_tokens >= max_tokens
+    let config = ThinkingConfig::Enabled {
+        budget_tokens: 10000,
+    };
+    assert!(config.validate(10000).is_err());
+
+    // Disabled is always valid
+    let config = ThinkingConfig::Disabled;
+    assert!(config.validate(100).is_ok());
+}
+
+/// Test ThinkingConfig thinking tiers.
+#[rstest]
+#[case(1024, 1)]
+#[case(4095, 1)]
+#[case(4096, 2)]
+#[case(16383, 2)]
+#[case(16384, 3)]
+#[case(65535, 3)]
+#[case(65536, 4)]
+#[case(100000, 4)]
+fn test_thinking_config_tiers(#[case] budget: usize, #[case] expected_tier: u8) {
+    let config = ThinkingConfig::Enabled {
+        budget_tokens: budget,
+    };
+    assert_eq!(config.thinking_tier(), Some(expected_tier));
+}
+
+/// Test ThinkingConfig disabled has no tier.
+#[test]
+fn test_thinking_config_disabled_tier() {
+    let config = ThinkingConfig::Disabled;
+    assert_eq!(config.thinking_tier(), None);
+}
+
+/// Test request with thinking configuration.
+#[test]
+fn test_request_with_thinking_config() {
+    let json = json!({
+        "model": "rwkv",
+        "messages": [{"role": "user", "content": "Solve this math problem"}],
+        "max_tokens": 20000,
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 10000
+        }
+    });
+
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert!(request.thinking.is_some());
+    let thinking = request.thinking.unwrap();
+    assert!(thinking.is_enabled());
+    assert_eq!(thinking.budget_tokens(), Some(10000));
 }

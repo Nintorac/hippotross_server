@@ -187,6 +187,15 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
         }
     }
 
+    // Validate thinking configuration if provided
+    if let Some(ref thinking) = req.thinking {
+        if let Err(msg) = thinking.validate(req.max_tokens) {
+            return Err(
+                ApiErrorResponse::invalid_request(msg).with_param("thinking.budget_tokens"),
+            );
+        }
+    }
+
     Ok(())
 }
 
