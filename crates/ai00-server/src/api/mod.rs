@@ -6,6 +6,7 @@ use flume::Sender;
 
 pub mod adapter;
 pub mod auth;
+pub mod error;
 pub mod file;
 pub mod model;
 pub mod oai;
