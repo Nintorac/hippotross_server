@@ -3,8 +3,8 @@
 mod common;
 
 use ai00_server::api::messages::{
-    ContentBlock, MessageContent, MessageParam, MessageRole, MessagesRequest, MessagesResponse,
-    StopReason,
+    validate_tool_name, ContentBlock, MessageContent, MessageParam, MessageRole, MessagesRequest,
+    MessagesResponse, StopReason, Tool, ToolChoice, ToolChoiceSimple, ToolChoiceSpecific,
 };
 use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
 use rstest::rstest;
@@ -125,4 +125,163 @@ fn test_full_request_deserialization() {
     assert_eq!(request.top_p, Some(0.9));
     assert_eq!(request.top_k, Some(40));
     assert_eq!(request.stop_sequences, Some(vec!["\n\n".to_string(), "END".to_string()]));
+}
+
+// =============================================================================
+// Tool Definition Tests
+// =============================================================================
+
+/// Test tool name validation regex.
+#[rstest]
+#[case("get_weather", true)]
+#[case("search_web", true)]
+#[case("my-tool-name", true)]
+#[case("Tool_123", true)]
+#[case("a", true)]  // Minimum length 1
+#[case("", false)]  // Empty not allowed
+#[case("tool name", false)]  // Spaces not allowed
+#[case("tool.name", false)]  // Dots not allowed
+#[case("tool@name", false)]  // Special chars not allowed
+fn test_tool_name_validation(#[case] name: &str, #[case] expected: bool) {
+    assert_eq!(validate_tool_name(name), expected, "Failed for: {}", name);
+}
+
+/// Test tool name length limits separately (can't use .repeat() in rstest attributes).
+#[test]
+fn test_tool_name_length_limits() {
+    // 64 chars - should be valid (max length)
+    let max_valid = "a".repeat(64);
+    assert!(validate_tool_name(&max_valid), "64-char name should be valid");
+
+    // 65 chars - should be invalid (too long)
+    let too_long = "a".repeat(65);
+    assert!(!validate_tool_name(&too_long), "65-char name should be invalid");
+}
+
+/// Test Tool struct deserialization.
+#[test]
+fn test_tool_deserialization() {
+    let json = json!({
+        "name": "get_weather",
+        "description": "Get the current weather for a location",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "The city and state"
+                }
+            },
+            "required": ["location"]
+        }
+    });
+
+    let tool: Tool = serde_json::from_value(json).unwrap();
+    assert_eq!(tool.name, "get_weather");
+    assert_eq!(tool.description, Some("Get the current weather for a location".to_string()));
+    assert!(tool.input_schema.is_object());
+    assert!(tool.validate().is_ok());
+}
+
+/// Test Tool validation.
+#[test]
+fn test_tool_validation() {
+    // Invalid name
+    let tool = Tool {
+        name: "invalid name".to_string(),
+        description: None,
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    };
+    assert!(tool.validate().is_err());
+
+    // Null schema
+    let tool = Tool {
+        name: "valid_name".to_string(),
+        description: None,
+        input_schema: serde_json::Value::Null,
+        cache_control: None,
+    };
+    assert!(tool.validate().is_err());
+
+    // Valid tool
+    let tool = Tool {
+        name: "valid_name".to_string(),
+        description: Some("A tool".to_string()),
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    };
+    assert!(tool.validate().is_ok());
+}
+
+/// Test ToolChoice deserialization - simple string variants.
+#[rstest]
+#[case("auto", ToolChoiceSimple::Auto)]
+#[case("none", ToolChoiceSimple::None)]
+#[case("any", ToolChoiceSimple::Any)]
+fn test_tool_choice_simple_deserialization(#[case] input: &str, #[case] expected: ToolChoiceSimple) {
+    let json = json!(input);
+    let choice: ToolChoice = serde_json::from_value(json).unwrap();
+    match choice {
+        ToolChoice::Simple(simple) => assert_eq!(simple, expected),
+        _ => panic!("Expected simple choice"),
+    }
+}
+
+/// Test ToolChoice deserialization - specific tool.
+#[test]
+fn test_tool_choice_specific_deserialization() {
+    let json = json!({
+        "type": "tool",
+        "name": "get_weather"
+    });
+
+    let choice: ToolChoice = serde_json::from_value(json).unwrap();
+    match choice {
+        ToolChoice::Specific(specific) => {
+            assert_eq!(specific.choice_type, "tool");
+            assert_eq!(specific.name, "get_weather");
+        }
+        _ => panic!("Expected specific choice"),
+    }
+}
+
+/// Test request with tools.
+#[test]
+fn test_request_with_tools() {
+    let json = json!({
+        "model": "rwkv",
+        "messages": [{"role": "user", "content": "What's the weather?"}],
+        "max_tokens": 100,
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get weather for a location",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    }
+                }
+            }
+        ],
+        "tool_choice": "auto"
+    });
+
+    let request: MessagesRequest = serde_json::from_value(json).unwrap();
+    assert!(request.tools.is_some());
+    let tools = request.tools.unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "get_weather");
+
+    assert!(request.tool_choice.is_some());
+}
+
+/// Test ToolChoiceSpecific constructor.
+#[test]
+fn test_tool_choice_specific_new() {
+    let choice = ToolChoiceSpecific::new("my_tool");
+    assert_eq!(choice.choice_type, "tool");
+    assert_eq!(choice.name, "my_tool");
+    assert!(choice.disable_parallel_tool_use.is_none());
 }
