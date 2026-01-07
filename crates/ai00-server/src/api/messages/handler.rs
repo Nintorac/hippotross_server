@@ -7,6 +7,7 @@ use futures_util::StreamExt;
 use salvo::{oapi::extract::JsonBody, prelude::*, sse::SseEvent};
 use tokio::sync::RwLock;
 
+use super::bnf_generator::generate_bnf_schema;
 use super::streaming::*;
 use super::thinking_extractor::{
     generate_thinking_signature, ThinkingExtractor, ThinkingStreamParser,
@@ -121,7 +122,6 @@ fn get_thinking_suffix(thinking: Option<&ThinkingConfig>) -> &'static str {
 /// 3. If raw `bnf_schema` is provided, use that (only when validation is None)
 ///
 /// Returns (effective_level, schema_to_use).
-/// Note: Grammar generation for Structural/SchemaAware is implemented in ninchat-upf.2-5.
 fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<String>) {
     let has_tools = req.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
     let has_thinking = req
@@ -137,10 +137,8 @@ fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<Stri
         // Not set - auto-enable Structural if tools/thinking present
         None => {
             if has_tools || has_thinking {
-                // TODO: Auto-enable once grammar generators are implemented (ninchat-upf.2-5)
-                // For now, fall back to None to maintain current behavior
-                // BnfValidationLevel::Structural
-                BnfValidationLevel::None
+                // Auto-enable Structural validation for structured output
+                BnfValidationLevel::Structural
             } else {
                 BnfValidationLevel::None
             }
@@ -154,9 +152,8 @@ fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<Stri
             req.bnf_schema.clone()
         }
         BnfValidationLevel::Structural | BnfValidationLevel::SchemaAware => {
-            // TODO: Generate grammar based on level (ninchat-upf.2-5)
-            // For now, fall back to raw bnf_schema if provided
-            req.bnf_schema.clone()
+            // Generate grammar based on validation level
+            generate_bnf_schema(req.tools.as_deref(), has_thinking, effective_level)
         }
     };
 
