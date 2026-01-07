@@ -230,12 +230,59 @@ async fn respond_one(
         }
     }
 
-    let content = vec![ContentBlock::Text {
-        text: text.trim().to_string(),
-    }];
+    // Check if tools are enabled and parse for tool_use
+    let has_tools = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
 
-    let response = MessagesResponse::new(model_name, content, token_counter.into())
-        .with_stop_reason(finish_reason.into());
+    let (content, stop_reason) = if has_tools {
+        // Parse the output for tool_call blocks
+        let mut parser = ToolParser::new();
+        let result = parser.feed(&text);
+        let final_result = parser.finalize();
+
+        let mut content_blocks: Vec<ContentBlock> = Vec::new();
+
+        // Add text content if any
+        let text_content = result
+            .text
+            .unwrap_or_default()
+            + &final_result.text.unwrap_or_default();
+        let trimmed_text = text_content.trim();
+        if !trimmed_text.is_empty() {
+            content_blocks.push(ContentBlock::Text {
+                text: trimmed_text.to_string(),
+            });
+        }
+
+        // Add tool_use blocks
+        let mut all_tools: Vec<_> = result.tool_uses;
+        all_tools.extend(final_result.tool_uses);
+
+        for tool_use in all_tools.iter() {
+            content_blocks.push(ContentBlock::ToolUse {
+                id: tool_use.id.clone(),
+                name: tool_use.name.clone(),
+                input: tool_use.input.clone(),
+            });
+        }
+
+        // Determine stop reason
+        let stop_reason = if !all_tools.is_empty() {
+            StopReason::ToolUse
+        } else {
+            finish_reason.into()
+        };
+
+        (content_blocks, stop_reason)
+    } else {
+        // Simple text response
+        let content = vec![ContentBlock::Text {
+            text: text.trim().to_string(),
+        }];
+        (content, finish_reason.into())
+    };
+
+    let response =
+        MessagesResponse::new(model_name, content, token_counter.into()).with_stop_reason(stop_reason);
 
     res.render(Json(response));
     Ok(())
