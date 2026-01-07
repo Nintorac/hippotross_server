@@ -8,6 +8,7 @@ use salvo::{oapi::extract::JsonBody, prelude::*, sse::SseEvent};
 use tokio::sync::RwLock;
 
 use super::streaming::*;
+use super::thinking_extractor::{generate_thinking_signature, ThinkingExtractor};
 use super::tool_parser::ToolParser;
 use super::types::{
     generate_tool_system_prompt, ContentBlock, MessageParam, MessageRole, MessagesRequest,
@@ -288,16 +289,47 @@ async fn respond_one(
         }
     }
 
-    // Check if tools are enabled and parse for tool_use
-    let has_tools = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    // Check if thinking is enabled
+    let thinking_enabled = request
+        .thinking
+        .as_ref()
+        .map(|t| t.is_enabled())
+        .unwrap_or(false);
+
+    // Check if tools are enabled
+    let has_tools = request
+        .tools
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+
+    // Extract thinking if enabled (do this before tool parsing)
+    let (thinking_block, text_for_parsing) = if thinking_enabled {
+        let extractor = ThinkingExtractor::new();
+        let result = extractor.extract(&text);
+
+        let thinking_block = result.thinking.map(|thinking| {
+            let signature = generate_thinking_signature(&thinking);
+            ContentBlock::Thinking { thinking, signature }
+        });
+
+        (thinking_block, result.response)
+    } else {
+        (None, text)
+    };
 
     let (content, stop_reason) = if has_tools {
         // Parse the output for tool_call blocks
         let mut parser = ToolParser::new();
-        let result = parser.feed(&text);
+        let result = parser.feed(&text_for_parsing);
         let final_result = parser.finalize();
 
         let mut content_blocks: Vec<ContentBlock> = Vec::new();
+
+        // Add thinking block first (if any)
+        if let Some(block) = thinking_block {
+            content_blocks.push(block);
+        }
 
         // Add text content if any
         let text_content = result
@@ -332,11 +364,23 @@ async fn respond_one(
 
         (content_blocks, stop_reason)
     } else {
-        // Simple text response
-        let content = vec![ContentBlock::Text {
-            text: text.trim().to_string(),
-        }];
-        (content, finish_reason.into())
+        // Simple text response (possibly with thinking)
+        let mut content_blocks: Vec<ContentBlock> = Vec::new();
+
+        // Add thinking block first (if any)
+        if let Some(block) = thinking_block {
+            content_blocks.push(block);
+        }
+
+        // Add text content
+        let trimmed = text_for_parsing.trim();
+        if !trimmed.is_empty() {
+            content_blocks.push(ContentBlock::Text {
+                text: trimmed.to_string(),
+            });
+        }
+
+        (content_blocks, finish_reason.into())
     };
 
     let response =
