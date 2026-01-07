@@ -89,6 +89,24 @@ pub enum ToolResultContent {
     Blocks(Vec<ContentBlock>),
 }
 
+impl ToolResultContent {
+    /// Extract text content from tool result.
+    pub fn to_text(&self) -> String {
+        match self {
+            ToolResultContent::Empty => String::new(),
+            ToolResultContent::Text(s) => s.clone(),
+            ToolResultContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+}
+
 /// Message content - can be simple string or array of content blocks.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
@@ -107,15 +125,45 @@ impl Default for MessageContent {
 
 impl MessageContent {
     /// Extract text content from message, concatenating text blocks.
+    /// Tool-related blocks are formatted in Hermes/Qwen style:
+    /// - ToolUse becomes `<tool_call>{"name": ..., "arguments": ...}</tool_call>`
+    /// - ToolResult becomes `<tool_response>{"name": ..., "content": ...}</tool_response>`
     pub fn to_text(&self) -> String {
         match self {
             MessageContent::Text(s) => s.clone(),
             MessageContent::Blocks(blocks) => blocks
                 .iter()
                 .filter_map(|b| match b {
-                    ContentBlock::Text { text } => Some(text.as_str()),
-                    ContentBlock::Thinking { thinking, .. } => Some(thinking.as_str()),
-                    _ => None,
+                    ContentBlock::Text { text } => Some(text.clone()),
+                    ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
+                    ContentBlock::ToolUse { name, input, .. } => {
+                        // Format as Hermes-style tool_call for context in continued conversations
+                        let call = serde_json::json!({
+                            "name": name,
+                            "arguments": input
+                        });
+                        Some(format!(
+                            "<tool_call>\n{}\n</tool_call>",
+                            serde_json::to_string(&call).unwrap_or_default()
+                        ))
+                    }
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error,
+                    } => {
+                        // Format as Hermes-style tool_response
+                        let result_text = content.to_text();
+                        let response = serde_json::json!({
+                            "tool_use_id": tool_use_id,
+                            "content": result_text,
+                            "is_error": is_error
+                        });
+                        Some(format!(
+                            "<tool_response>\n{}\n</tool_response>",
+                            serde_json::to_string(&response).unwrap_or_default()
+                        ))
+                    }
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
