@@ -220,33 +220,29 @@ impl Tool {
         Ok(())
     }
 
-    /// Format this tool as markdown for prompt injection.
-    pub fn to_markdown(&self) -> String {
-        let mut md = format!("### {}\n", self.name);
-
-        if let Some(desc) = &self.description {
-            md.push_str(&format!("{}\n\n", desc));
-        }
-
-        md.push_str("**Input Schema:**\n```json\n");
-        md.push_str(&serde_json::to_string_pretty(&self.input_schema).unwrap_or_default());
-        md.push_str("\n```\n");
-
-        md
+    /// Format this tool as a Hermes-style JSON function definition.
+    pub fn to_hermes_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description.clone().unwrap_or_default(),
+                "parameters": self.input_schema
+            }
+        })
     }
 }
 
-/// Generate a system prompt section describing available tools.
+/// Generate a system prompt section describing available tools (Hermes/Qwen format).
 ///
-/// This function creates a markdown-formatted description of tools that can be
-/// prepended or appended to the system prompt to enable tool use.
+/// This function creates tool definitions in the `<tools>` tag format used by
+/// Qwen and other Hermes-style models.
 ///
-/// The format instructs the model to output tool calls in a specific XML-like format:
+/// The format instructs the model to output tool calls as:
 /// ```text
-/// <tool_use>
-/// <name>tool_name</name>
-/// <input>{"param": "value"}</input>
-/// </tool_use>
+/// <tool_call>
+/// {"name": "tool_name", "arguments": {"param": "value"}}
+/// </tool_call>
 /// ```
 pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
     if tools.is_empty() {
@@ -254,21 +250,26 @@ pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
     }
 
     let mut prompt = String::from(
-        "\n\n## Available Tools\n\n\
-         You have access to the following tools. To use a tool, respond with a tool_use block:\n\n\
-         ```\n\
-         <tool_use>\n\
-         <name>tool_name</name>\n\
-         <input>{\"parameter\": \"value\"}</input>\n\
-         </tool_use>\n\
-         ```\n\n\
-         You may use multiple tools in a single response if needed.\n\n",
+        "\n\n# Tools\n\n\
+         You may call one or more functions to assist with the user query.\n\n\
+         You are provided with function signatures within <tools></tools> XML tags:\n\
+         <tools>\n",
     );
 
+    // Add each tool as a JSON line
     for tool in tools {
-        prompt.push_str(&tool.to_markdown());
+        prompt.push_str(&serde_json::to_string(&tool.to_hermes_json()).unwrap_or_default());
         prompt.push('\n');
     }
+
+    prompt.push_str(
+        "</tools>\n\n\
+         For each function call, return a json object with function name and arguments \
+         within <tool_call></tool_call> XML tags:\n\
+         <tool_call>\n\
+         {\"name\": <function-name>, \"arguments\": <args-json-object>}\n\
+         </tool_call>",
+    );
 
     prompt
 }

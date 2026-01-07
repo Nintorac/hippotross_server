@@ -288,7 +288,7 @@ fn test_tool_choice_specific_new() {
 }
 
 // =============================================================================
-// Tool Prompt Injection Tests
+// Tool Prompt Injection Tests (Hermes/Qwen Format)
 // =============================================================================
 
 /// Test generate_tool_system_prompt with empty tools.
@@ -315,18 +315,17 @@ fn test_generate_tool_system_prompt_single_tool() {
 
     let result = generate_tool_system_prompt(&tools);
 
-    // Should contain the tool instruction header
-    assert!(result.contains("Available Tools"));
-    assert!(result.contains("<tool_use>"));
-    assert!(result.contains("<name>"));
-    assert!(result.contains("<input>"));
+    // Should use Hermes/Qwen format with <tools> tag
+    assert!(result.contains("<tools>"));
+    assert!(result.contains("</tools>"));
+    assert!(result.contains("<tool_call>"));
+    assert!(result.contains("</tool_call>"));
 
-    // Should contain the tool name and description
+    // Should contain the tool definition as JSON
     assert!(result.contains("get_weather"));
     assert!(result.contains("Get the current weather for a location"));
-
-    // Should contain the schema
-    assert!(result.contains("location"));
+    // JSON is compact (no spaces after colons)
+    assert!(result.contains("\"type\":\"function\""));
 }
 
 /// Test generate_tool_system_prompt with multiple tools.
@@ -356,9 +355,9 @@ fn test_generate_tool_system_prompt_multiple_tools() {
     assert!(result.contains("Search the web"));
 }
 
-/// Test Tool::to_markdown formatting.
+/// Test Tool::to_hermes_json formatting.
 #[test]
-fn test_tool_to_markdown() {
+fn test_tool_to_hermes_json() {
     let tool = Tool {
         name: "calculate".to_string(),
         description: Some("Perform arithmetic calculations".to_string()),
@@ -372,14 +371,11 @@ fn test_tool_to_markdown() {
         cache_control: None,
     };
 
-    let md = tool.to_markdown();
+    let json = tool.to_hermes_json();
 
-    // Should have header with tool name
-    assert!(md.contains("### calculate"));
-    // Should have description
-    assert!(md.contains("Perform arithmetic calculations"));
-    // Should have input schema section
-    assert!(md.contains("**Input Schema:**"));
-    assert!(md.contains("```json"));
-    assert!(md.contains("expression"));
+    // Should have Hermes function format
+    assert_eq!(json["type"], "function");
+    assert_eq!(json["function"]["name"], "calculate");
+    assert_eq!(json["function"]["description"], "Perform arithmetic calculations");
+    assert!(json["function"]["parameters"]["properties"]["expression"].is_object());
 }
