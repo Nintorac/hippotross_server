@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 
 use super::streaming::*;
 use super::thinking_extractor::{
-    generate_thinking_signature, ThinkingExtractor, ThinkingStreamParser, ThinkingStreamState,
+    generate_thinking_signature, ThinkingExtractor, ThinkingStreamParser,
 };
 use super::tool_parser::ToolParser;
 use super::types::{
