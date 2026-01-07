@@ -4,6 +4,7 @@
 //! Anthropic's Claude Messages API format.
 
 mod handler;
+mod streaming;
 mod types;
 
 pub use handler::messages_handler;

@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use ai00_core::{GenerateRequest, ThreadRequest, Token, MAX_TOKENS};
 use futures_util::StreamExt;
-use salvo::{oapi::extract::JsonBody, prelude::*};
+use salvo::{oapi::extract::JsonBody, prelude::*, sse::SseEvent};
 use tokio::sync::RwLock;
 
+use super::streaming::*;
 use super::types::*;
 use crate::{
     api::{error::ApiErrorResponse, request_info},
@@ -15,9 +16,6 @@ use crate::{
 };
 
 use ai00_core::sampler::nucleus::{NucleusParams, NucleusSampler};
-
-/// Special token required at start of prompt for RWKV state initialization.
-const RWKV_EOT: &str = "";  // Token ID = 0, but we use empty string as tokenizer handles it
 
 /// Build RWKV prompt from messages.
 fn build_prompt(system: Option<&str>, messages: &[MessageParam]) -> String {
@@ -170,6 +168,77 @@ async fn respond_one(
     Ok(())
 }
 
+/// Handle streaming messages request with Claude-style SSE events.
+async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut Response) {
+    let sender = depot.obtain::<ThreadSender>().unwrap();
+    let info = request_info(sender.clone(), SLEEP).await;
+    let model_name = info.reload.model_path.to_string_lossy().into_owned();
+
+    let (token_sender, token_receiver) = flume::unbounded();
+    let gen_request = Box::new(to_generate_request(&request));
+    let _ = sender.send(ThreadRequest::Generate {
+        request: gen_request,
+        tokenizer: info.tokenizer.clone(),
+        sender: token_sender,
+    });
+
+    // Generate message ID
+    let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+
+    // Estimate input tokens (rough approximation)
+    let input_tokens = request
+        .messages
+        .iter()
+        .map(|m| m.content.to_text().len() / 4)
+        .sum::<usize>()
+        + request.system.as_ref().map(|s| s.len() / 4).unwrap_or(0);
+
+    let mut output_tokens = 0usize;
+    let mut start_token = true;
+    let mut started = false;
+
+    let stream = token_receiver.into_stream().map(move |token| -> Result<SseEvent, std::convert::Infallible> {
+        match token {
+            Token::Start => {
+                started = true;
+                // Emit message_start event
+                Ok(emit_message_start(message_id.clone(), model_name.clone(), input_tokens))
+            }
+            Token::Content(text) => {
+                output_tokens += 1;
+
+                // On first content, emit content_block_start if we haven't
+                if start_token {
+                    start_token = false;
+                    let trimmed = text.trim_start().to_string();
+                    if trimmed.is_empty() {
+                        return Ok(emit_content_block_start_text(0));
+                    }
+                    // For first non-empty token, we'd ideally emit both start and delta
+                    // but SSE is one event at a time, so just emit the delta
+                    return Ok(emit_text_delta(0, trimmed));
+                }
+
+                if text.is_empty() {
+                    Ok(emit_ping())
+                } else {
+                    Ok(emit_text_delta(0, text))
+                }
+            }
+            Token::Stop(reason, _counter) => {
+                let stop_reason: StopReason = reason.into();
+                Ok(emit_message_delta(stop_reason, output_tokens))
+            }
+            Token::Done => {
+                Ok(emit_message_stop())
+            }
+            _ => Ok(emit_ping()),
+        }
+    });
+
+    salvo::sse::stream(res, stream);
+}
+
 /// Generate messages completion (Claude-compatible).
 ///
 /// This endpoint provides Claude Messages API compatibility for RWKV models.
@@ -195,18 +264,13 @@ pub async fn messages_handler(
         return;
     }
 
-    // For now, only support non-streaming
-    if request.stream {
-        let err = ApiErrorResponse::invalid_request(
-            "Streaming not yet implemented. Set stream: false",
-        );
-        res.status_code(err.status_code());
-        res.render(Json(err));
-        return;
-    }
-
-    if let Err(err) = respond_one(depot, request, res).await {
-        res.status_code(err.status_code());
-        res.render(Json(err));
+    match request.stream {
+        true => respond_stream(depot, request, res).await,
+        false => {
+            if let Err(err) = respond_one(depot, request, res).await {
+                res.status_code(err.status_code());
+                res.render(Json(err));
+            }
+        }
     }
 }
