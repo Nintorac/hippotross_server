@@ -78,9 +78,13 @@ async fn get_shared_model() -> Option<&'static SharedModel> {
 // Test Configuration
 // ============================================================================
 
-/// Path to the 100m model for testing.
+/// Path to the model for testing.
+/// Can be overridden with BNF_TEST_MODEL env var.
+/// Default: 0.1B model for fast CI. Use 2.9B+ for tool calling tests.
 fn model_path() -> PathBuf {
-    PathBuf::from("/workspace/models/rwkv7-g1a-0.1b-20250728-ctx4096.st")
+    std::env::var("BNF_TEST_MODEL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/workspace/models/rwkv7-g1a-0.1b-20250728-ctx4096.st"))
 }
 
 /// Path to the tokenizer.
@@ -151,8 +155,8 @@ async fn setup_model_internal() -> (Sender<ThreadRequest>, Arc<Tokenizer>) {
         })
         .expect("Failed to send reload request");
 
-    // Wait for model to load (with timeout)
-    let loaded = tokio::time::timeout(Duration::from_secs(60), result_receiver.recv_async())
+    // Wait for model to load (with timeout - larger models need more time)
+    let loaded = tokio::time::timeout(Duration::from_secs(300), result_receiver.recv_async())
         .await
         .expect("Model load timeout")
         .expect("Failed to receive load result");
@@ -652,4 +656,268 @@ fn test_generate_schema_aware_grammar_integration() {
     assert!(grammar.contains("start::="));
     assert!(grammar.contains("tool_call::="));
     assert!(grammar.contains("<think>"));
+}
+
+// ============================================================================
+// Tool Calling Integration Tests (require GPU and model)
+// ============================================================================
+//
+// These tests require a model that supports function calling (2.9B+).
+// Run with: BNF_TEST_MODEL=/workspace/models/rwkv7-g1c-2.9b-20251231-ctx8192.st cargo test --test bnf_integration_test tool_call -- --nocapture
+
+use ai00_server::api::messages::{generate_tool_system_prompt, ToolParser};
+
+/// Check if we're using a model that supports tool calling.
+fn model_supports_tool_calling() -> bool {
+    let path = model_path();
+    let path_str = path.to_string_lossy();
+    // 0.1B model doesn't support tool calling
+    !path_str.contains("0.1b")
+}
+
+/// Build a prompt that requests the model to use a tool.
+fn build_tool_prompt(user_message: &str, tools: &[Tool]) -> String {
+    let tool_system = generate_tool_system_prompt(tools);
+    format!(
+        "System: You are a helpful assistant.{}\n\nUser: {}\n\nA:",
+        tool_system, user_message
+    )
+}
+
+/// Test that model generates tool_call tags when prompted with tools.
+#[tokio::test]
+async fn test_model_generates_tool_call_tags() {
+    if !model_supports_tool_calling() {
+        eprintln!("Model {:?} doesn't support tool calling, skipping. Set BNF_TEST_MODEL to use a larger model.", model_path());
+        return;
+    }
+    let Some(model) = get_shared_model().await else {
+        eprintln!("Model not found at {:?}, skipping test", model_path());
+        return;
+    };
+
+    let tools = vec![Tool {
+        name: "get_weather".to_string(),
+        description: Some("Get the current weather for a location".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "The city and country"
+                }
+            },
+            "required": ["location"]
+        }),
+        cache_control: None,
+    }];
+
+    let prompt = build_tool_prompt("What is the weather in Tokyo?", &tools);
+    println!("Prompt:\n{}", prompt);
+
+    let output = generate_with_bnf(&model.sender, &model.tokenizer, &prompt, None, 100).await;
+    println!("Model output:\n{}", output);
+
+    // Check that the output contains tool_call tags
+    let has_tool_call = output.contains("<tool_call>");
+    let has_tool_use = output.contains("<tool_use>");
+
+    println!("Has <tool_call>: {}", has_tool_call);
+    println!("Has <tool_use>: {}", has_tool_use);
+
+    assert!(
+        has_tool_call,
+        "Model should generate <tool_call> tags. Got: {}",
+        output
+    );
+    assert!(
+        !has_tool_use,
+        "Model should NOT use <tool_use> tags (should use <tool_call>). Got: {}",
+        output
+    );
+}
+
+/// Test that ToolParser correctly parses model's tool_call output.
+#[tokio::test]
+async fn test_tool_parser_parses_model_output() {
+    if !model_supports_tool_calling() {
+        eprintln!("Model {:?} doesn't support tool calling, skipping.", model_path());
+        return;
+    }
+    let Some(model) = get_shared_model().await else {
+        eprintln!("Model not found at {:?}, skipping test", model_path());
+        return;
+    };
+
+    let tools = vec![Tool {
+        name: "get_weather".to_string(),
+        description: Some("Get the current weather for a location".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"}
+            },
+            "required": ["location"]
+        }),
+        cache_control: None,
+    }];
+
+    let prompt = build_tool_prompt("What's the weather in Paris?", &tools);
+    let output = generate_with_bnf(&model.sender, &model.tokenizer, &prompt, None, 100).await;
+
+    println!("Model output:\n{}", output);
+
+    // Parse with ToolParser
+    let mut parser = ToolParser::new();
+    let result = parser.feed(&output);
+    let final_result = parser.finalize();
+
+    let mut all_tools: Vec<_> = result.tool_uses;
+    all_tools.extend(final_result.tool_uses);
+
+    println!("Parsed {} tool calls", all_tools.len());
+    for tool in &all_tools {
+        println!("  - {}: {:?}", tool.name, tool.input);
+    }
+
+    assert!(
+        parser.has_tool_use(),
+        "ToolParser should detect tool calls in model output. Output was: {}",
+        output
+    );
+
+    assert!(
+        !all_tools.is_empty(),
+        "Should have at least one parsed tool call"
+    );
+
+    // Verify the tool name matches
+    assert_eq!(
+        all_tools[0].name, "get_weather",
+        "Tool name should be 'get_weather'"
+    );
+}
+
+/// Test tool calling with multiple tools available.
+#[tokio::test]
+async fn test_model_tool_call_with_multiple_tools() {
+    if !model_supports_tool_calling() {
+        eprintln!("Model {:?} doesn't support tool calling, skipping.", model_path());
+        return;
+    }
+    let Some(model) = get_shared_model().await else {
+        eprintln!("Model not found at {:?}, skipping test", model_path());
+        return;
+    };
+
+    let tools = vec![
+        Tool {
+            name: "get_weather".to_string(),
+            description: Some("Get weather for a location".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"}
+                },
+                "required": ["location"]
+            }),
+            cache_control: None,
+        },
+        Tool {
+            name: "search".to_string(),
+            description: Some("Search the web for information".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                },
+                "required": ["query"]
+            }),
+            cache_control: None,
+        },
+    ];
+
+    let prompt = build_tool_prompt("Search for the latest news about AI", &tools);
+    let output = generate_with_bnf(&model.sender, &model.tokenizer, &prompt, None, 100).await;
+
+    println!("Model output:\n{}", output);
+
+    let mut parser = ToolParser::new();
+    parser.feed(&output);
+    parser.finalize();
+
+    assert!(
+        parser.has_tool_use(),
+        "Model should call a tool when prompted. Output: {}",
+        output
+    );
+}
+
+/// Test that the tool prompt format is being followed.
+#[tokio::test]
+async fn test_tool_call_json_format() {
+    if !model_supports_tool_calling() {
+        eprintln!("Model {:?} doesn't support tool calling, skipping.", model_path());
+        return;
+    }
+    let Some(model) = get_shared_model().await else {
+        eprintln!("Model not found at {:?}, skipping test", model_path());
+        return;
+    };
+
+    let tools = vec![Tool {
+        name: "calculate".to_string(),
+        description: Some("Perform a calculation".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string"}
+            },
+            "required": ["expression"]
+        }),
+        cache_control: None,
+    }];
+
+    let prompt = build_tool_prompt("Calculate 2 + 2", &tools);
+    let output = generate_with_bnf(&model.sender, &model.tokenizer, &prompt, None, 100).await;
+
+    println!("Model output:\n{}", output);
+
+    // Parse with ToolParser
+    let mut parser = ToolParser::new();
+    let result = parser.feed(&output);
+    let final_result = parser.finalize();
+
+    let mut all_tools: Vec<_> = result.tool_uses;
+    all_tools.extend(final_result.tool_uses);
+
+    if !all_tools.is_empty() {
+        let tool = &all_tools[0];
+        println!("Parsed tool: {} with input: {}", tool.name, tool.input);
+
+        // Verify the JSON has the expected structure
+        assert_eq!(tool.name, "calculate");
+        assert!(
+            tool.input.is_object(),
+            "Tool input should be a JSON object"
+        );
+    } else {
+        // If no tools parsed, check if the output has the right format at all
+        if output.contains("<tool_call>") {
+            panic!(
+                "Output contains <tool_call> but parser didn't extract it. Output: {}",
+                output
+            );
+        } else if output.contains("<tool_use>") {
+            panic!(
+                "Model used <tool_use> instead of <tool_call>. Prompt should prevent this. Output: {}",
+                output
+            );
+        } else {
+            panic!(
+                "Model did not generate any tool call tags. Output: {}",
+                output
+            );
+        }
+    }
 }

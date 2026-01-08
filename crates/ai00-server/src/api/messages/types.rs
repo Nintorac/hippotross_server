@@ -312,11 +312,11 @@ pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
 
     prompt.push_str(
         "</tools>\n\n\
-         For each function call, return a json object with function name and arguments \
-         within <tool_call></tool_call> XML tags:\n\
+         IMPORTANT: To call a function, use EXACTLY this XML format:\n\
          <tool_call>\n\
-         {\"name\": <function-name>, \"arguments\": <args-json-object>}\n\
-         </tool_call>",
+         {\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n\
+         </tool_call>\n\n\
+         NEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.",
     );
 
     prompt
