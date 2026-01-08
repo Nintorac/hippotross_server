@@ -243,7 +243,7 @@ pub struct PromptsConfig {
     pub role_user: String,
 
     /// Role name for assistant messages in prompt.
-    #[derivative(Default(value = "String::from(\"A\")"))]
+    #[derivative(Default(value = "String::from(\"Assistant\")"))]
     pub role_assistant: String,
 
     /// Role name for system messages in prompt.
@@ -251,11 +251,12 @@ pub struct PromptsConfig {
     pub role_system: String,
 
     /// Prefix added before assistant generation (normal mode).
-    #[derivative(Default(value = "String::from(\"A:\")"))]
+    #[derivative(Default(value = "String::from(\"Assistant:\")"))]
     pub assistant_prefix: String,
 
     /// Prefix added before assistant generation (thinking mode).
-    #[derivative(Default(value = "String::from(\"A: <think\")"))]
+    /// Note: Do NOT close the <think bracket - model continues from there.
+    #[derivative(Default(value = "String::from(\"Assistant: <think\")"))]
     pub assistant_prefix_thinking: String,
 
     /// Default stop sequences (when not provided in request).

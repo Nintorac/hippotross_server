@@ -406,18 +406,19 @@ fn test_generate_tool_system_prompt_defaults() {
 }
 
 /// Test PromptsConfig default values.
+/// See docs/rwkv_goose_chat_format.md for format details.
 #[test]
 fn test_prompts_config_defaults() {
     let config = PromptsConfig::default();
 
-    // Check role defaults
+    // Check role defaults (RWKV7-G1 format)
     assert_eq!(config.role_user, "User");
-    assert_eq!(config.role_assistant, "A");
+    assert_eq!(config.role_assistant, "Assistant");
     assert_eq!(config.role_system, "System");
 
     // Check assistant prefix defaults
-    assert_eq!(config.assistant_prefix, "A:");
-    assert_eq!(config.assistant_prefix_thinking, "A: <think");
+    assert_eq!(config.assistant_prefix, "Assistant:");
+    assert_eq!(config.assistant_prefix_thinking, "Assistant: <think");
 
     // Check thinking suffix defaults
     assert_eq!(config.thinking_suffix_short, " think a bit");

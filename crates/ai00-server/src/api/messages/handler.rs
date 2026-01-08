@@ -27,13 +27,50 @@ use crate::{
 
 use ai00_core::sampler::nucleus::{NucleusParams, NucleusSampler};
 
+/// Collapse multiple consecutive newlines into a single newline.
+///
+/// RWKV uses `\n\n` as a "chat round separator" in pretrain data, so we must
+/// avoid having `\n\n` within message content to prevent premature turn endings.
+///
+/// See: https://huggingface.co/BlinkDL/rwkv7-g1
+fn normalize_newlines(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut prev_was_newline = false;
+
+    for c in text.chars() {
+        if c == '\n' {
+            if !prev_was_newline {
+                result.push('\n');
+            }
+            prev_was_newline = true;
+        } else {
+            result.push(c);
+            prev_was_newline = false;
+        }
+    }
+    result
+}
+
 /// Build RWKV prompt from messages.
 ///
-/// For thinking mode (RWKV 20250922+ models), the format is:
+/// Format for RWKV7-G1 (https://huggingface.co/BlinkDL/rwkv7-g1):
+/// ```text
+/// System: SYSTEM_PROMPT
+///
+/// User: USER_MESSAGE
+///
+/// Assistant: ASSISTANT_MESSAGE
+///
+/// User: USER_MESSAGE
+///
+/// Assistant:
+/// ```
+///
+/// For thinking mode (RWKV 20250922+ models):
 /// ```text
 /// User: USER_PROMPT think
 ///
-/// A: <think
+/// Assistant: <think
 /// ```
 /// With variants "think a bit" (shorter) and "think a lot" (longer).
 fn build_prompt(
@@ -46,8 +83,10 @@ fn build_prompt(
     let mut prompt = String::new();
 
     // Add system prompt first (from top-level param, not message role)
+    // Normalize newlines to prevent \n\n from being interpreted as turn separator
     if let Some(sys) = system {
-        prompt.push_str(&format!("{}: {}", prompts.role_system, sys));
+        let normalized_sys = normalize_newlines(sys);
+        prompt.push_str(&format!("{}: {}", prompts.role_system, normalized_sys));
 
         // Inject tool definitions into system prompt if provided
         if let Some(tools) = tools {
@@ -75,13 +114,14 @@ fn build_prompt(
     }
 
     // Format conversation messages
+    // Normalize newlines in content to prevent \n\n from being interpreted as turn separator
     let msg_count = messages.len();
     for (i, msg) in messages.iter().enumerate() {
         let role = match msg.role {
             MessageRole::User => &prompts.role_user,
             MessageRole::Assistant => &prompts.role_assistant,
         };
-        let content = msg.content.to_text();
+        let content = normalize_newlines(&msg.content.to_text());
 
         // For the last user message when thinking is enabled, append think suffix
         let is_last_user = i == msg_count - 1 && msg.role == MessageRole::User;
@@ -102,7 +142,9 @@ fn build_prompt(
         prompt.push_str(&prompts.assistant_prefix);
     }
 
-    prompt
+    // RWKV requires no trailing whitespace or tokenizer may produce non-English output
+    // See: https://huggingface.co/BlinkDL/rwkv7-g1
+    prompt.trim_end().to_string()
 }
 
 /// Get the thinking suffix to append to user message based on budget.
@@ -956,5 +998,48 @@ pub async fn messages_handler(
                 res.render(Json(err));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_newlines_collapses_double() {
+        assert_eq!(normalize_newlines("hello\n\nworld"), "hello\nworld");
+    }
+
+    #[test]
+    fn test_normalize_newlines_collapses_triple() {
+        assert_eq!(normalize_newlines("hello\n\n\nworld"), "hello\nworld");
+    }
+
+    #[test]
+    fn test_normalize_newlines_preserves_single() {
+        assert_eq!(normalize_newlines("hello\nworld"), "hello\nworld");
+    }
+
+    #[test]
+    fn test_normalize_newlines_multiple_groups() {
+        assert_eq!(
+            normalize_newlines("a\n\nb\n\n\nc\nd"),
+            "a\nb\nc\nd"
+        );
+    }
+
+    #[test]
+    fn test_normalize_newlines_empty() {
+        assert_eq!(normalize_newlines(""), "");
+    }
+
+    #[test]
+    fn test_normalize_newlines_no_newlines() {
+        assert_eq!(normalize_newlines("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_normalize_newlines_only_newlines() {
+        assert_eq!(normalize_newlines("\n\n\n\n"), "\n");
     }
 }
