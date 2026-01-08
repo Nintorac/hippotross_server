@@ -56,3 +56,21 @@ path = "assets/www/index.zip" # Path to the WebUI.
 # home = "assets/models/hf"
 # lib = "assets/ort/onnxruntime.dll"  # Only used under windows.
 # name = { MultilingualE5Small = {} }
+
+# [prompts] # Uncomment to customize prompts. Defaults shown below.
+# Tool system prompt configuration (Hermes/Qwen style)
+# tool_header = "\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n"
+# tool_footer = "</tools>\n\nIMPORTANT: To call a function, use EXACTLY this XML format:\n<tool_call>\n{\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n\nNEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field."
+# Thinking mode suffixes (appended to user message based on budget_tokens)
+# thinking_suffix_short = " think a bit"       # tier 1: 1024-4095 tokens
+# thinking_suffix_standard = " think"          # tier 2: 4096-16383 tokens
+# thinking_suffix_extended = " think a lot"    # tier 3+: 16384+ tokens
+# Role names for prompt formatting
+# role_user = "User"
+# role_assistant = "A"
+# role_system = "System"
+# Assistant generation prefixes
+# assistant_prefix = "A:"
+# assistant_prefix_thinking = "A: <think"
+# Default stop sequences (when not provided in request)
+# default_stop_sequences = ["\n\nUser:"]

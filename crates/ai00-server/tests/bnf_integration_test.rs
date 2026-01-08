@@ -677,7 +677,7 @@ fn model_supports_tool_calling() -> bool {
 
 /// Build a prompt that requests the model to use a tool.
 fn build_tool_prompt(user_message: &str, tools: &[Tool]) -> String {
-    let tool_system = generate_tool_system_prompt(tools);
+    let tool_system = generate_tool_system_prompt(tools, None, None);
     format!(
         "System: You are a helpful assistant.{}\n\nUser: {}\n\nA:",
         tool_system, user_message

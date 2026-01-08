@@ -23,6 +23,7 @@ pub struct Config {
     pub adapter: AdapterOption,
     pub listen: ListenerOption,
     pub web: Option<WebOption>,
+    pub prompts: PromptsConfig,
     #[cfg(feature = "embed")]
     pub embed: Option<EmbedOption>,
 }
@@ -205,4 +206,59 @@ pub struct ListenerOption {
 pub struct WebOption {
     #[derivative(Default(value = "\"assets/www/index.zip\".into()"))]
     pub path: PathBuf,
+}
+
+/// Prompts configuration for customizing model behavior.
+///
+/// This allows overriding the default prompts used for tool calling,
+/// thinking mode, and conversation formatting.
+#[derive(Debug, Derivative, Clone, Serialize, Deserialize)]
+#[derivative(Default)]
+#[serde(default)]
+pub struct PromptsConfig {
+    /// Header for tool system prompt (before tool definitions).
+    /// Use {tools_json} as placeholder for tool definitions.
+    #[derivative(Default(value = r#"String::from("\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n")"#))]
+    pub tool_header: String,
+
+    /// Footer/instructions for tool system prompt (after tool definitions).
+    /// This instructs the model how to format tool calls.
+    #[derivative(Default(value = r#"String::from("</tools>\n\nIMPORTANT: To call a function, use EXACTLY this XML format:\n<tool_call>\n{\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n\nNEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.")"#))]
+    pub tool_footer: String,
+
+    /// Suffix appended to user message for short thinking (tier 1: 1024-4095 tokens).
+    #[derivative(Default(value = "String::from(\" think a bit\")"))]
+    pub thinking_suffix_short: String,
+
+    /// Suffix appended to user message for standard thinking (tier 2: 4096-16383 tokens).
+    #[derivative(Default(value = "String::from(\" think\")"))]
+    pub thinking_suffix_standard: String,
+
+    /// Suffix appended to user message for extended thinking (tier 3+: 16384+ tokens).
+    #[derivative(Default(value = "String::from(\" think a lot\")"))]
+    pub thinking_suffix_extended: String,
+
+    /// Role name for user messages in prompt.
+    #[derivative(Default(value = "String::from(\"User\")"))]
+    pub role_user: String,
+
+    /// Role name for assistant messages in prompt.
+    #[derivative(Default(value = "String::from(\"A\")"))]
+    pub role_assistant: String,
+
+    /// Role name for system messages in prompt.
+    #[derivative(Default(value = "String::from(\"System\")"))]
+    pub role_system: String,
+
+    /// Prefix added before assistant generation (normal mode).
+    #[derivative(Default(value = "String::from(\"A:\")"))]
+    pub assistant_prefix: String,
+
+    /// Prefix added before assistant generation (thinking mode).
+    #[derivative(Default(value = "String::from(\"A: <think\")"))]
+    pub assistant_prefix_thinking: String,
+
+    /// Default stop sequences (when not provided in request).
+    #[derivative(Default(value = "vec![String::from(\"\\n\\nUser:\")]"))]
+    pub default_stop_sequences: Vec<String>,
 }
