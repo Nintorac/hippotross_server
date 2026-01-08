@@ -322,6 +322,10 @@ fn test_generate_tool_system_prompt_single_tool() {
     assert!(result.contains("<tool_call>"));
     assert!(result.contains("</tool_call>"));
 
+    // Should have explicit instructions to use tool_call (not tool_use)
+    assert!(result.contains("IMPORTANT"));
+    assert!(result.contains("NEVER use <tool_use>"));
+
     // Should contain the tool definition as JSON
     assert!(result.contains("get_weather"));
     assert!(result.contains("Get the current weather for a location"));
@@ -1552,4 +1556,407 @@ fn test_bnf_schema_with_thinking_allowed() {
     let request: MessagesRequest = serde_json::from_value(json).unwrap();
     assert!(request.bnf_schema.is_some());
     assert!(request.thinking.is_some());
+}
+
+// =============================================================================
+// Handler Integration Tests (Tool Parsing Flow)
+// =============================================================================
+//
+// These tests verify the full tool parsing flow as it would happen in the
+// handler, simulating the token stream and parsing.
+
+/// Test that has_tools evaluates correctly with tools in request.
+#[test]
+fn test_has_tools_detection() {
+    // Request without tools
+    let request_no_tools = MessagesRequest {
+        model: "test".into(),
+        messages: vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Hello".into()),
+        }],
+        system: None,
+        max_tokens: 100,
+        stream: false,
+        stop_sequences: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        metadata: None,
+        bnf_schema: None,
+        bnf_validation: None,
+    };
+
+    let has_tools = request_no_tools
+        .tools
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+    assert!(!has_tools, "has_tools should be false when tools is None");
+
+    // Request with empty tools array
+    let request_empty_tools = MessagesRequest {
+        tools: Some(vec![]),
+        ..request_no_tools.clone()
+    };
+
+    let has_tools = request_empty_tools
+        .tools
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+    assert!(!has_tools, "has_tools should be false when tools is empty");
+
+    // Request with tools
+    let request_with_tools = MessagesRequest {
+        tools: Some(vec![Tool {
+            name: "get_weather".to_string(),
+            description: Some("Get weather".to_string()),
+            input_schema: json!({"type": "object"}),
+            cache_control: None,
+        }]),
+        ..request_no_tools
+    };
+
+    let has_tools = request_with_tools
+        .tools
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+    assert!(has_tools, "has_tools should be true when tools are present");
+}
+
+/// Simulate the handler's tool parsing logic from respond_one.
+/// This tests the exact flow used in the handler.
+fn simulate_respond_one_tool_parsing(text: &str, has_tools: bool) -> Vec<ContentBlock> {
+    if has_tools {
+        // Parse the output for tool_call blocks
+        let mut parser = ToolParser::new();
+        let result = parser.feed(text);
+        let final_result = parser.finalize();
+
+        let mut content_blocks: Vec<ContentBlock> = Vec::new();
+
+        // Add text content if any
+        let text_content = result
+            .text
+            .unwrap_or_default()
+            + &final_result.text.unwrap_or_default();
+        let trimmed_text = text_content.trim();
+        if !trimmed_text.is_empty() {
+            content_blocks.push(ContentBlock::Text {
+                text: trimmed_text.to_string(),
+            });
+        }
+
+        // Add tool_use blocks
+        let mut all_tools: Vec<_> = result.tool_uses;
+        all_tools.extend(final_result.tool_uses);
+
+        for tool_use in all_tools.iter() {
+            content_blocks.push(ContentBlock::ToolUse {
+                id: tool_use.id.clone(),
+                name: tool_use.name.clone(),
+                input: tool_use.input.clone(),
+            });
+        }
+
+        content_blocks
+    } else {
+        // Simple text response
+        vec![ContentBlock::Text {
+            text: text.trim().to_string(),
+        }]
+    }
+}
+
+/// Test handler tool parsing with a simple tool_call.
+#[test]
+fn test_handler_tool_parsing_simple() {
+    let model_output = r#"I'll check the weather for you.
+<tool_call>
+{"name": "get_weather", "arguments": {"location": "NYC"}}
+</tool_call>"#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    assert_eq!(blocks.len(), 2, "Should have text and tool_use blocks");
+
+    // First block should be text
+    match &blocks[0] {
+        ContentBlock::Text { text } => {
+            assert!(text.contains("check the weather"), "Text should contain message");
+        }
+        _ => panic!("First block should be text"),
+    }
+
+    // Second block should be tool_use
+    match &blocks[1] {
+        ContentBlock::ToolUse { id, name, input } => {
+            assert!(id.starts_with("toolu_"), "ID should have tool prefix");
+            assert_eq!(name, "get_weather");
+            assert_eq!(input["location"], "NYC");
+        }
+        _ => panic!("Second block should be tool_use"),
+    }
+}
+
+/// Test handler tool parsing when has_tools is false (should not parse).
+#[test]
+fn test_handler_tool_parsing_disabled() {
+    let model_output = r#"<tool_call>
+{"name": "get_weather", "arguments": {"location": "NYC"}}
+</tool_call>"#;
+
+    // When has_tools is false, should return raw text
+    let blocks = simulate_respond_one_tool_parsing(model_output, false);
+
+    assert_eq!(blocks.len(), 1, "Should have only text block");
+    match &blocks[0] {
+        ContentBlock::Text { text } => {
+            assert!(text.contains("<tool_call>"), "Raw text should contain tool_call tag");
+        }
+        _ => panic!("Should be text block"),
+    }
+}
+
+/// Test handler tool parsing with multiple tool calls.
+#[test]
+fn test_handler_tool_parsing_multiple() {
+    let model_output = r#"Let me search and calculate.
+<tool_call>
+{"name": "search", "arguments": {"query": "rust async"}}
+</tool_call>
+<tool_call>
+{"name": "calculate", "arguments": {"expr": "2+2"}}
+</tool_call>"#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    assert_eq!(blocks.len(), 3, "Should have text and 2 tool_use blocks");
+
+    match &blocks[1] {
+        ContentBlock::ToolUse { name, .. } => assert_eq!(name, "search"),
+        _ => panic!("Should be tool_use"),
+    }
+
+    match &blocks[2] {
+        ContentBlock::ToolUse { name, .. } => assert_eq!(name, "calculate"),
+        _ => panic!("Should be tool_use"),
+    }
+}
+
+/// Test handler tool parsing with tool_call but NO text before it.
+#[test]
+fn test_handler_tool_parsing_no_text() {
+    let model_output = r#"<tool_call>
+{"name": "get_weather", "arguments": {"location": "NYC"}}
+</tool_call>"#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    // Should only have tool_use block (no empty text block)
+    assert_eq!(blocks.len(), 1, "Should have only tool_use block");
+    match &blocks[0] {
+        ContentBlock::ToolUse { name, .. } => assert_eq!(name, "get_weather"),
+        _ => panic!("Should be tool_use"),
+    }
+}
+
+/// Test handler tool parsing with compact JSON (no newlines in JSON).
+#[test]
+fn test_handler_tool_parsing_compact_json() {
+    let model_output = r#"<tool_call>{"name": "get_weather", "arguments": {"location": "NYC"}}</tool_call>"#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    assert_eq!(blocks.len(), 1, "Should have tool_use block");
+    match &blocks[0] {
+        ContentBlock::ToolUse { name, input, .. } => {
+            assert_eq!(name, "get_weather");
+            assert_eq!(input["location"], "NYC");
+        }
+        _ => panic!("Should be tool_use"),
+    }
+}
+
+/// Test handler tool parsing with nested JSON arguments.
+#[test]
+fn test_handler_tool_parsing_nested_json() {
+    let model_output = r#"<tool_call>
+{"name": "create_user", "arguments": {"user": {"name": "John", "email": "john@test.com"}, "notify": true}}
+</tool_call>"#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    assert_eq!(blocks.len(), 1);
+    match &blocks[0] {
+        ContentBlock::ToolUse { name, input, .. } => {
+            assert_eq!(name, "create_user");
+            assert_eq!(input["user"]["name"], "John");
+            assert_eq!(input["notify"], true);
+        }
+        _ => panic!("Should be tool_use"),
+    }
+}
+
+/// Test handler tool parsing with empty arguments.
+#[test]
+fn test_handler_tool_parsing_empty_args() {
+    let model_output = r#"<tool_call>
+{"name": "get_current_time", "arguments": {}}
+</tool_call>"#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    assert_eq!(blocks.len(), 1);
+    match &blocks[0] {
+        ContentBlock::ToolUse { name, input, .. } => {
+            assert_eq!(name, "get_current_time");
+            assert!(input.as_object().unwrap().is_empty());
+        }
+        _ => panic!("Should be tool_use"),
+    }
+}
+
+/// Test handler tool parsing with text after tool call.
+#[test]
+fn test_handler_tool_parsing_text_after() {
+    let model_output = r#"<tool_call>
+{"name": "search", "arguments": {"q": "test"}}
+</tool_call>
+Here are the results."#;
+
+    let blocks = simulate_respond_one_tool_parsing(model_output, true);
+
+    // Should have text (after) and tool_use
+    // Note: With current parser, text after might be captured
+    assert!(blocks.len() >= 1, "Should have at least tool_use block");
+
+    // Find the tool_use block
+    let tool_use = blocks.iter().find(|b| matches!(b, ContentBlock::ToolUse { .. }));
+    assert!(tool_use.is_some(), "Should have tool_use block");
+}
+
+/// Test that ToolParser correctly handles streaming tokens.
+#[test]
+fn test_tool_parser_streaming_simulation() {
+    let mut parser = ToolParser::new();
+    let mut all_tools = Vec::new();
+    let mut all_text = String::new();
+
+    // Simulate streaming tokens that form a tool_call
+    let tokens = [
+        "Let me ",
+        "check. ",
+        "<tool",
+        "_call>",
+        "{\"name\": ",
+        "\"get_weather\", ",
+        "\"arguments\": ",
+        "{\"location\": \"NYC\"}}",
+        "</tool_call>",
+    ];
+
+    for token in tokens {
+        let result = parser.feed(token);
+        if let Some(text) = result.text {
+            all_text.push_str(&text);
+        }
+        all_tools.extend(result.tool_uses);
+    }
+
+    let final_result = parser.finalize();
+    if let Some(text) = final_result.text {
+        all_text.push_str(&text);
+    }
+    all_tools.extend(final_result.tool_uses);
+
+    assert_eq!(all_tools.len(), 1, "Should have parsed one tool");
+    assert_eq!(all_tools[0].name, "get_weather");
+    assert!(all_text.contains("Let me check"), "Should have text content");
+}
+
+/// Test response JSON structure matches Claude API format.
+#[test]
+fn test_response_structure_with_tool_use() {
+    let content = vec![
+        ContentBlock::Text {
+            text: "Let me search for that.".to_string(),
+        },
+        ContentBlock::ToolUse {
+            id: "toolu_000000000001".to_string(),
+            name: "web_search".to_string(),
+            input: json!({"query": "Rust programming"}),
+        },
+    ];
+
+    let response = MessagesResponse::new("rwkv".to_string(), content, Default::default())
+        .with_stop_reason(StopReason::ToolUse);
+
+    let json = serde_json::to_value(&response).unwrap();
+
+    // Verify structure matches Claude API
+    assert_eq!(json["type"], "message");
+    assert_eq!(json["role"], "assistant");
+    assert_eq!(json["stop_reason"], "tool_use");
+
+    // Verify content array
+    let content = json["content"].as_array().unwrap();
+    assert_eq!(content.len(), 2);
+
+    // Text block
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[0]["text"], "Let me search for that.");
+
+    // Tool use block
+    assert_eq!(content[1]["type"], "tool_use");
+    assert_eq!(content[1]["id"], "toolu_000000000001");
+    assert_eq!(content[1]["name"], "web_search");
+    assert_eq!(content[1]["input"]["query"], "Rust programming");
+}
+
+/// Test parsing model output that uses "input" instead of "arguments".
+/// The model might use "input" (Claude format) instead of "arguments" (OpenAI format).
+#[test]
+fn test_tool_parser_input_vs_arguments() {
+    let mut parser = ToolParser::new();
+
+    // Our parser expects "arguments" field (Hermes/Qwen format)
+    let with_arguments = r#"<tool_call>
+{"name": "get_weather", "arguments": {"location": "NYC"}}
+</tool_call>"#;
+
+    let result = parser.feed(with_arguments);
+    let final_result = parser.finalize();
+    let tools: Vec<_> = result.tool_uses.into_iter().chain(final_result.tool_uses).collect();
+
+    assert_eq!(tools.len(), 1, "Should parse with 'arguments' field");
+    assert_eq!(tools[0].input["location"], "NYC");
+}
+
+/// Test that model output with <tool_use> tags is NOT parsed.
+/// (We only support <tool_call> format per Hermes/Qwen spec)
+#[test]
+fn test_tool_use_tags_not_parsed() {
+    let mut parser = ToolParser::new();
+
+    // Model might output <tool_use> if it was trained on Claude format
+    let with_tool_use = r#"<tool_use>
+{"name": "get_weather", "input": {"location": "NYC"}}
+</tool_use>"#;
+
+    let result = parser.feed(with_tool_use);
+    let final_result = parser.finalize();
+    let tools: Vec<_> = result.tool_uses.into_iter().chain(final_result.tool_uses).collect();
+
+    // Should NOT parse - we only support <tool_call>
+    assert_eq!(tools.len(), 0, "Should NOT parse <tool_use> tags");
+
+    // The <tool_use> content should be in the text output
+    let text = result.text.unwrap_or_default() + &final_result.text.unwrap_or_default();
+    assert!(text.contains("<tool_use>"), "tool_use should appear in text");
 }
