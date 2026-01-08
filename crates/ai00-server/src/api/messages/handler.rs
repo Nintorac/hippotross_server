@@ -20,6 +20,7 @@ use super::types::{
 };
 use crate::{
     api::{error::ApiErrorResponse, request_info},
+    config::{Config, PromptsConfig},
     types::ThreadSender,
     SLEEP,
 };
@@ -40,17 +41,22 @@ fn build_prompt(
     messages: &[MessageParam],
     tools: Option<&[Tool]>,
     thinking: Option<&ThinkingConfig>,
+    prompts: &PromptsConfig,
 ) -> String {
     let mut prompt = String::new();
 
     // Add system prompt first (from top-level param, not message role)
     if let Some(sys) = system {
-        prompt.push_str(&format!("System: {}", sys));
+        prompt.push_str(&format!("{}: {}", prompts.role_system, sys));
 
         // Inject tool definitions into system prompt if provided
         if let Some(tools) = tools {
             if !tools.is_empty() {
-                prompt.push_str(&generate_tool_system_prompt(tools));
+                prompt.push_str(&generate_tool_system_prompt(
+                    tools,
+                    Some(&prompts.tool_header),
+                    Some(&prompts.tool_footer),
+                ));
             }
         }
 
@@ -58,8 +64,12 @@ fn build_prompt(
     } else if let Some(tools) = tools {
         // If no system prompt but tools provided, create one for tools
         if !tools.is_empty() {
-            prompt.push_str("System:");
-            prompt.push_str(&generate_tool_system_prompt(tools));
+            prompt.push_str(&format!("{}:", prompts.role_system));
+            prompt.push_str(&generate_tool_system_prompt(
+                tools,
+                Some(&prompts.tool_header),
+                Some(&prompts.tool_footer),
+            ));
             prompt.push_str("\n\n");
         }
     }
@@ -68,15 +78,15 @@ fn build_prompt(
     let msg_count = messages.len();
     for (i, msg) in messages.iter().enumerate() {
         let role = match msg.role {
-            MessageRole::User => "User",
-            MessageRole::Assistant => "A",
+            MessageRole::User => &prompts.role_user,
+            MessageRole::Assistant => &prompts.role_assistant,
         };
         let content = msg.content.to_text();
 
         // For the last user message when thinking is enabled, append think suffix
         let is_last_user = i == msg_count - 1 && msg.role == MessageRole::User;
         let think_suffix = if is_last_user {
-            get_thinking_suffix(thinking)
+            get_thinking_suffix(thinking, prompts)
         } else {
             ""
         };
@@ -86,24 +96,24 @@ fn build_prompt(
 
     // Add assistant prefix for generation
     if thinking.map(|t| t.is_enabled()).unwrap_or(false) {
-        // Thinking mode: use "A: <think" prefix
-        prompt.push_str("A: <think");
+        // Thinking mode: use configurable thinking prefix
+        prompt.push_str(&prompts.assistant_prefix_thinking);
     } else {
-        prompt.push_str("A:");
+        prompt.push_str(&prompts.assistant_prefix);
     }
 
     prompt
 }
 
 /// Get the thinking suffix to append to user message based on budget.
-fn get_thinking_suffix(thinking: Option<&ThinkingConfig>) -> &'static str {
+fn get_thinking_suffix<'a>(thinking: Option<&ThinkingConfig>, prompts: &'a PromptsConfig) -> &'a str {
     match thinking {
         Some(ThinkingConfig::Enabled { budget_tokens }) => {
             // Map budget to thinking intensity
             match *budget_tokens {
-                0..=4095 => " think a bit",      // Tier 1: shorter thinking
-                4096..=16383 => " think",        // Tier 2: standard thinking
-                _ => " think a lot",             // Tier 3+: extended thinking
+                0..=4095 => &prompts.thinking_suffix_short,      // Tier 1: shorter thinking
+                4096..=16383 => &prompts.thinking_suffix_standard,  // Tier 2: standard thinking
+                _ => &prompts.thinking_suffix_extended,          // Tier 3+: extended thinking
             }
         }
         _ => "",
@@ -168,12 +178,13 @@ fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<Stri
 }
 
 /// Convert MessagesRequest to GenerateRequest.
-fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
+fn to_generate_request(req: &MessagesRequest, prompts: &PromptsConfig) -> GenerateRequest {
     let prompt = build_prompt(
         req.system.as_deref(),
         &req.messages,
         req.tools.as_deref(),
         req.thinking.as_ref(),
+        prompts,
     );
 
     // Extract model text from previous assistant messages
@@ -190,7 +201,7 @@ fn to_generate_request(req: &MessagesRequest) -> GenerateRequest {
     let stop = req
         .stop_sequences
         .clone()
-        .unwrap_or_else(|| vec!["\n\nUser:".to_string()]);
+        .unwrap_or_else(|| prompts.default_stop_sequences.clone());
 
     // Build sampler from request parameters
     let temperature = req.temperature.unwrap_or(1.0);
@@ -347,12 +358,14 @@ async fn respond_one(
     res: &mut Response,
 ) -> Result<(), ApiErrorResponse> {
     let sender = depot.obtain::<ThreadSender>().unwrap();
+    let config = depot.obtain::<Config>().unwrap();
+    let prompts = &config.prompts;
 
     let info = request_info(sender.clone(), SLEEP).await;
     let model_name = info.reload.model_path.to_string_lossy().into_owned();
 
     let (token_sender, token_receiver) = flume::unbounded();
-    let gen_request = Box::new(to_generate_request(&request));
+    let gen_request = Box::new(to_generate_request(&request, prompts));
     let _ = sender.send(ThreadRequest::Generate {
         request: gen_request,
         tokenizer: info.tokenizer,
@@ -484,11 +497,14 @@ async fn respond_one(
 /// Handle streaming messages request with Claude-style SSE events.
 async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut Response) {
     let sender = depot.obtain::<ThreadSender>().unwrap();
+    let config = depot.obtain::<Config>().unwrap();
+    let prompts = &config.prompts;
+
     let info = request_info(sender.clone(), SLEEP).await;
     let model_name = info.reload.model_path.to_string_lossy().into_owned();
 
     let (token_sender, token_receiver) = flume::unbounded();
-    let gen_request = Box::new(to_generate_request(&request));
+    let gen_request = Box::new(to_generate_request(&request, prompts));
     let _ = sender.send(ThreadRequest::Generate {
         request: gen_request,
         tokenizer: info.tokenizer.clone(),

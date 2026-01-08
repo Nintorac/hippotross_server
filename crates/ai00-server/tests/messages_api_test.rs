@@ -9,6 +9,7 @@ use ai00_server::api::messages::{
     ThinkingStreamState, Tool, ToolChoice, ToolChoiceSimple, ToolChoiceSpecific,
 };
 use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
+use ai00_server::config::PromptsConfig;
 use rstest::rstest;
 use serde_json::json;
 
@@ -295,7 +296,7 @@ fn test_tool_choice_specific_new() {
 /// Test generate_tool_system_prompt with empty tools.
 #[test]
 fn test_generate_tool_system_prompt_empty() {
-    let result = generate_tool_system_prompt(&[]);
+    let result = generate_tool_system_prompt(&[], None, None);
     assert!(result.is_empty());
 }
 
@@ -314,7 +315,7 @@ fn test_generate_tool_system_prompt_single_tool() {
         cache_control: None,
     }];
 
-    let result = generate_tool_system_prompt(&tools);
+    let result = generate_tool_system_prompt(&tools, None, None);
 
     // Should use Hermes/Qwen format with <tools> tag
     assert!(result.contains("<tools>"));
@@ -351,13 +352,84 @@ fn test_generate_tool_system_prompt_multiple_tools() {
         },
     ];
 
-    let result = generate_tool_system_prompt(&tools);
+    let result = generate_tool_system_prompt(&tools, None, None);
 
     // Should contain both tools
     assert!(result.contains("get_weather"));
     assert!(result.contains("search_web"));
     assert!(result.contains("Get weather"));
     assert!(result.contains("Search the web"));
+}
+
+/// Test generate_tool_system_prompt with custom header and footer.
+#[test]
+fn test_generate_tool_system_prompt_custom_prompts() {
+    let tools = vec![Tool {
+        name: "my_tool".to_string(),
+        description: Some("A custom tool".to_string()),
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    }];
+
+    let custom_header = "[TOOLS]\n";
+    let custom_footer = "\n[/TOOLS]\nUse tools wisely.";
+
+    let result = generate_tool_system_prompt(&tools, Some(custom_header), Some(custom_footer));
+
+    // Should use custom header and footer
+    assert!(result.starts_with("[TOOLS]"));
+    assert!(result.ends_with("Use tools wisely."));
+    assert!(result.contains("my_tool"));
+    // Should NOT contain default header/footer text
+    assert!(!result.contains("# Tools"));
+    assert!(!result.contains("NEVER use <tool_use>"));
+}
+
+/// Test generate_tool_system_prompt uses defaults when None provided.
+#[test]
+fn test_generate_tool_system_prompt_defaults() {
+    let tools = vec![Tool {
+        name: "test_tool".to_string(),
+        description: Some("Test".to_string()),
+        input_schema: json!({"type": "object"}),
+        cache_control: None,
+    }];
+
+    let result = generate_tool_system_prompt(&tools, None, None);
+
+    // Should contain default header text
+    assert!(result.contains("# Tools"));
+    assert!(result.contains("function signatures within <tools></tools>"));
+    // Should contain default footer text
+    assert!(result.contains("IMPORTANT: To call a function, use EXACTLY this XML format:"));
+    assert!(result.contains("NEVER use <tool_use>"));
+}
+
+/// Test PromptsConfig default values.
+#[test]
+fn test_prompts_config_defaults() {
+    let config = PromptsConfig::default();
+
+    // Check role defaults
+    assert_eq!(config.role_user, "User");
+    assert_eq!(config.role_assistant, "A");
+    assert_eq!(config.role_system, "System");
+
+    // Check assistant prefix defaults
+    assert_eq!(config.assistant_prefix, "A:");
+    assert_eq!(config.assistant_prefix_thinking, "A: <think");
+
+    // Check thinking suffix defaults
+    assert_eq!(config.thinking_suffix_short, " think a bit");
+    assert_eq!(config.thinking_suffix_standard, " think");
+    assert_eq!(config.thinking_suffix_extended, " think a lot");
+
+    // Check default stop sequences
+    assert_eq!(config.default_stop_sequences, vec!["\n\nUser:"]);
+
+    // Check tool header and footer contain expected content
+    assert!(config.tool_header.contains("# Tools"));
+    assert!(config.tool_footer.contains("NEVER use <tool_use>"));
 }
 
 // =============================================================================

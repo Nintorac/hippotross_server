@@ -292,17 +292,37 @@ impl Tool {
 /// {"name": "tool_name", "arguments": {"param": "value"}}
 /// </tool_call>
 /// ```
-pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
+///
+/// # Arguments
+/// * `tools` - The tool definitions to include
+/// * `tool_header` - Optional custom header (uses default if None)
+/// * `tool_footer` - Optional custom footer (uses default if None)
+pub fn generate_tool_system_prompt(
+    tools: &[Tool],
+    tool_header: Option<&str>,
+    tool_footer: Option<&str>,
+) -> String {
     if tools.is_empty() {
         return String::new();
     }
 
-    let mut prompt = String::from(
-        "\n\n# Tools\n\n\
-         You may call one or more functions to assist with the user query.\n\n\
-         You are provided with function signatures within <tools></tools> XML tags:\n\
-         <tools>\n",
-    );
+    // Default header and footer
+    const DEFAULT_HEADER: &str = "\n\n# Tools\n\n\
+        You may call one or more functions to assist with the user query.\n\n\
+        You are provided with function signatures within <tools></tools> XML tags:\n\
+        <tools>\n";
+
+    const DEFAULT_FOOTER: &str = "</tools>\n\n\
+        IMPORTANT: To call a function, use EXACTLY this XML format:\n\
+        <tool_call>\n\
+        {\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n\
+        </tool_call>\n\n\
+        NEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.";
+
+    let header = tool_header.unwrap_or(DEFAULT_HEADER);
+    let footer = tool_footer.unwrap_or(DEFAULT_FOOTER);
+
+    let mut prompt = String::from(header);
 
     // Add each tool as a JSON line
     for tool in tools {
@@ -310,14 +330,7 @@ pub fn generate_tool_system_prompt(tools: &[Tool]) -> String {
         prompt.push('\n');
     }
 
-    prompt.push_str(
-        "</tools>\n\n\
-         IMPORTANT: To call a function, use EXACTLY this XML format:\n\
-         <tool_call>\n\
-         {\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n\
-         </tool_call>\n\n\
-         NEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.",
-    );
+    prompt.push_str(footer);
 
     prompt
 }
