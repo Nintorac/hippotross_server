@@ -1387,7 +1387,7 @@ fn test_integration_schema_aware_with_tools() {
     assert!(grammar.contains("get_weather_input"));
 
     // Should have tool dispatch rule
-    assert!(grammar.contains("tool_call ::="));
+    assert!(grammar.contains("tool_call::="));
 
     // Should have enum values from schema
     assert!(grammar.contains("celsius") || grammar.contains("fahrenheit"));
@@ -1429,7 +1429,7 @@ fn test_integration_schema_aware_multiple_tools() {
     assert!(grammar.contains("search_call"));
 
     // Dispatch rule should have alternation
-    assert!(grammar.contains("tool_call ::="));
+    assert!(grammar.contains("tool_call::="));
     assert!(grammar.contains(" | "));
 }
 
@@ -1479,7 +1479,7 @@ fn test_integration_grammar_constants_structure() {
 fn test_integration_build_structural_grammar() {
     // No features - should still have start rule
     let grammar = build_structural_grammar(false, false);
-    assert!(grammar.contains("start ::="));
+    assert!(grammar.contains("start::="));
     assert!(grammar.contains("json_object"));
 
     // Thinking only
@@ -1564,10 +1564,10 @@ greeting ::= "Hello" | "Hi";"#;
 
     let wrapped = wrap_grammar_with_thinking(user_grammar);
 
-    // Should have new start rule with thinking block
-    assert!(wrapped.contains("start ::= [thinking_block] user_start"));
+    // Should have new start rule with thinking block (uses ? for optional in KBNF)
+    assert!(wrapped.contains("start::=thinking_block? user_start"));
     // User's start should be renamed to user_start
-    assert!(wrapped.contains("user_start ::= greeting"));
+    assert!(wrapped.contains("user_start::= greeting"));
     // User's other rules should be preserved
     assert!(wrapped.contains("greeting ::="));
     // Should have thinking block definitions
@@ -1604,10 +1604,10 @@ list ::= "[" "]";"#;
 
     let wrapped = wrap_grammar_with_thinking(user_grammar);
 
-    // Start rule should be renamed
-    assert!(wrapped.contains("user_start ::= text | json_object | list"));
-    // New start rule should reference user_start
-    assert!(wrapped.contains("[thinking_block] user_start"));
+    // Start rule should be renamed (note: replacement removes space before ::=)
+    assert!(wrapped.contains("user_start::= text | json_object | list"));
+    // New start rule should reference user_start (uses ? for optional in KBNF)
+    assert!(wrapped.contains("thinking_block? user_start"));
 }
 
 /// Test that bnf_schema + thinking no longer causes an error.
