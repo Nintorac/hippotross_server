@@ -26,10 +26,6 @@ use crate::{
 
 use ai00_core::sampler::nucleus::{NucleusParams, NucleusSampler};
 
-/// RWKV end-of-text token for state initialization.
-/// Required at the start of prompts for proper model attention.
-const RWKV_EOT_TOKEN: &str = "<|rwkv_tokenizer_end_of_text|>";
-
 /// Build RWKV prompt from messages.
 ///
 /// For thinking mode (RWKV 20250922+ models), the format is:
@@ -45,8 +41,7 @@ fn build_prompt(
     tools: Option<&[Tool]>,
     thinking: Option<&ThinkingConfig>,
 ) -> String {
-    // Start with RWKV EOT token for proper state initialization
-    let mut prompt = String::from(RWKV_EOT_TOKEN);
+    let mut prompt = String::new();
 
     // Add system prompt first (from top-level param, not message role)
     if let Some(sys) = system {
