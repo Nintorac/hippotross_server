@@ -3,9 +3,14 @@
 //! This tool reads JSONL files containing `/v1/messages` requests and converts
 //! them to the binidx format used for RWKV model fine-tuning.
 
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use anyhow::Result;
+use ai00_server::api::messages::prompt::build_prompt;
+use ai00_server::api::messages::MessagesRequest;
+use ai00_server::config::Config;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 /// Convert JSONL message requests to RWKV binidx format.
@@ -49,6 +54,78 @@ struct Args {
     separator: String,
 }
 
+/// Read and parse JSONL file into MessagesRequest objects.
+fn read_jsonl(path: &PathBuf) -> Result<Vec<MessagesRequest>> {
+    let file = File::open(path).with_context(|| format!("Failed to open {:?}", path))?;
+    let reader = BufReader::new(file);
+
+    let mut requests = Vec::new();
+    for (line_num, line) in reader.lines().enumerate() {
+        let line = line.with_context(|| format!("Failed to read line {}", line_num + 1))?;
+        let line = line.trim();
+
+        // Skip empty lines
+        if line.is_empty() {
+            continue;
+        }
+
+        let request: MessagesRequest = serde_json::from_str(line)
+            .with_context(|| format!("Failed to parse line {} as MessagesRequest", line_num + 1))?;
+
+        requests.push(request);
+    }
+
+    Ok(requests)
+}
+
+/// Load config and extract PromptsConfig.
+fn load_prompts_config(path: &PathBuf) -> Result<Config> {
+    let contents =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
+
+    let config: Config =
+        toml::from_str(&contents).with_context(|| format!("Failed to parse {:?}", path))?;
+
+    Ok(config)
+}
+
+/// Run text-only mode: print formatted prompts to stdout.
+fn run_text_only(args: &Args) -> Result<()> {
+    eprintln!("Loading config from {:?}...", args.prompts_config);
+    let config = load_prompts_config(&args.prompts_config)?;
+
+    eprintln!("Reading JSONL from {:?}...", args.input);
+    let requests = read_jsonl(&args.input)?;
+    eprintln!("Loaded {} requests", requests.len());
+
+    for (i, req) in requests.iter().enumerate() {
+        // Build prompt using exact server code path
+        let prompt = build_prompt(
+            req.system.as_deref(),
+            &req.messages,
+            req.tools.as_deref(),
+            req.thinking.as_ref(),
+            &config.prompts,
+        );
+
+        // Print separator between prompts (not before first)
+        if i > 0 {
+            println!("{}", args.separator);
+        }
+
+        println!("{}", prompt);
+    }
+
+    eprintln!("\nProcessed {} prompts", requests.len());
+    Ok(())
+}
+
+/// Run binidx generation mode.
+fn run_binidx(_args: &Args) -> Result<()> {
+    // TODO: Implement binidx generation
+    anyhow::bail!("Binidx generation not yet implemented")
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -62,20 +139,9 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("make-binidx v{}", env!("CARGO_PKG_VERSION"));
-    println!("Input: {:?}", args.input);
-
     if args.text_only {
-        println!("Mode: text-only (separator: {:?})", args.separator);
+        run_text_only(&args)
     } else {
-        println!("Output: {:?}", args.output.as_ref().unwrap());
-        println!("Tokenizer: {:?}", args.tokenizer.as_ref().unwrap());
-        println!("Context length: {}", args.ctx_len);
-        println!("Repeat: {}", args.repeat);
+        run_binidx(&args)
     }
-
-    // TODO: Implement actual processing
-    println!("\n[Skeleton - implementation pending]");
-
-    Ok(())
 }
