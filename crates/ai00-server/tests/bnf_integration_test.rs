@@ -557,12 +557,12 @@ fn test_build_structural_grammar_combinations() {
 
     // Tools only
     let grammar = build_structural_grammar(false, true);
-    assert!(grammar.contains("<tool_use>"));
+    assert!(grammar.contains("<tool_call>"));
 
     // Both
     let grammar = build_structural_grammar(true, true);
     assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<tool_use>"));
+    assert!(grammar.contains("<tool_call>"));
 }
 
 /// Test tool name grammar generation.

@@ -1312,7 +1312,7 @@ fn test_integration_structural_thinking_only() {
     assert!(grammar.contains("<think>"));
     assert!(grammar.contains("</think>"));
     // Should NOT contain tool tags
-    assert!(!grammar.contains("<tool_use>"));
+    assert!(!grammar.contains("<tool_call>"));
     // Should contain JSON primitives
     assert!(grammar.contains("json_object"));
 }
@@ -1332,8 +1332,8 @@ fn test_integration_structural_tools_only() {
 
     let grammar = result.unwrap();
     // Should contain tool tags
-    assert!(grammar.contains("<tool_use>"));
-    assert!(grammar.contains("</tool_use>"));
+    assert!(grammar.contains("<tool_call>"));
+    assert!(grammar.contains("</tool_call>"));
     // Should NOT contain thinking tags
     assert!(!grammar.contains("<think>"));
 }
@@ -1354,7 +1354,7 @@ fn test_integration_structural_thinking_and_tools() {
     let grammar = result.unwrap();
     // Should contain both thinking and tool tags
     assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<tool_use>"));
+    assert!(grammar.contains("<tool_call>"));
 }
 
 /// Test SchemaAware level generates tool-specific grammars.
@@ -1467,11 +1467,11 @@ fn test_integration_grammar_constants_structure() {
     assert!(GRAMMAR_THINKING_ONLY.contains("<think>"));
 
     assert!(GRAMMAR_TOOLS_ONLY.contains("::="));
-    assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_use>"));
+    assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_call>"));
 
     assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("::="));
     assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<think>"));
-    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_use>"));
+    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_call>"));
 }
 
 /// Test build_structural_grammar helper.
@@ -1485,17 +1485,17 @@ fn test_integration_build_structural_grammar() {
     // Thinking only
     let grammar = build_structural_grammar(true, false);
     assert!(grammar.contains("<think>"));
-    assert!(!grammar.contains("<tool_use>"));
+    assert!(!grammar.contains("<tool_call>"));
 
     // Tools only
     let grammar = build_structural_grammar(false, true);
-    assert!(grammar.contains("<tool_use>"));
+    assert!(grammar.contains("<tool_call>"));
     assert!(!grammar.contains("<think>"));
 
     // Both
     let grammar = build_structural_grammar(true, true);
     assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<tool_use>"));
+    assert!(grammar.contains("<tool_call>"));
 }
 
 /// Test grammar generation with complex nested schema.

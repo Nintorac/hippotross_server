@@ -293,9 +293,9 @@ pub fn generate_tool_grammars(tools: &[Tool]) -> String {
         // Generate input schema rule using json_schema_to_kbnf
         json_schema_to_kbnf(&tool.input_schema, &input_rule, &mut ctx);
 
-        // Tool call rule: {"name": "tool_name", "input": ...}
+        // Tool call rule: {"name": "tool_name", "arguments": ...}
         ctx.add_rule(format!(
-            r#"{}::='{{' ws '"name"' ws ':' ws '"{}"' ws ',' ws '"input"' ws ':' ws {} ws '}}';"#,
+            r#"{}::='{{' ws '"name"' ws ':' ws '"{}"' ws ',' ws '"arguments"' ws ':' ws {} ws '}}';"#,
             call_rule, tool.name, input_rule
         ));
 
@@ -337,8 +337,8 @@ thinking_content::=#'[^<]*';
 
     grammar.push_str(r#"
 text_or_tools::=text? tool_sequence?;
-tool_sequence::=tool_use text? tool_sequence?;
-tool_use::='<tool_use>' ws tool_call ws '</tool_use>';
+tool_sequence::=tool_call_block text? tool_sequence?;
+tool_call_block::='<tool_call>' ws tool_call ws '</tool_call>';
 text::=#'[^<]*';
 "#);
     grammar.push('\n');
@@ -820,7 +820,7 @@ mod tests {
         assert!(!grammar.contains("thinking_block"));
 
         // Should have tool structure
-        assert!(grammar.contains("tool_use::="));
+        assert!(grammar.contains("tool_call_block::="));
         assert!(grammar.contains("tool_call"));
     }
 
@@ -881,9 +881,9 @@ mod tests {
         assert!(grammar.contains("start::="));
         assert!(grammar.contains("text_or_tools"));
         assert!(grammar.contains("tool_sequence"));
-        assert!(grammar.contains("tool_use"));
-        assert!(grammar.contains("<tool_use>"));
-        assert!(grammar.contains("</tool_use>"));
+        assert!(grammar.contains("tool_call_block"));
+        assert!(grammar.contains("<tool_call>"));
+        assert!(grammar.contains("</tool_call>"));
 
         // Tool dispatch
         assert!(grammar.contains("tool_call::="));
@@ -933,7 +933,7 @@ mod tests {
         let grammar = result.unwrap();
         assert!(grammar.contains("<think>"));
         assert!(grammar.contains("</think>"));
-        assert!(!grammar.contains("<tool_use>"));
+        assert!(!grammar.contains("<tool_call>"));
     }
 
     #[test]
@@ -945,8 +945,8 @@ mod tests {
         assert!(result.is_some());
 
         let grammar = result.unwrap();
-        assert!(grammar.contains("<tool_use>"));
-        assert!(grammar.contains("</tool_use>"));
+        assert!(grammar.contains("<tool_call>"));
+        assert!(grammar.contains("</tool_call>"));
         assert!(!grammar.contains("<think>"));
     }
 
@@ -960,7 +960,7 @@ mod tests {
 
         let grammar = result.unwrap();
         assert!(grammar.contains("<think>"));
-        assert!(grammar.contains("<tool_use>"));
+        assert!(grammar.contains("<tool_call>"));
     }
 
     #[test]
