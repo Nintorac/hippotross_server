@@ -2,11 +2,13 @@
 //!
 //! This tool reads JSONL files containing `/v1/messages` requests and converts
 //! them to the binidx format used for RWKV model fine-tuning.
+//!
+//! Supports streaming from files or stdin for processing large datasets.
 
 mod binidx;
 
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 
 use ai00_server::api::messages::prompt::build_prompt;
@@ -20,14 +22,29 @@ use web_rwkv::tokenizer::Tokenizer;
 use binidx::BinidxWriter;
 
 /// Convert JSONL message requests to RWKV binidx format.
+///
+/// Reads MessagesRequest objects from JSONL input (file or stdin) and converts
+/// them to binidx format for RWKV fine-tuning. Processes data in streaming mode
+/// to handle files larger than memory.
+///
+/// Examples:
+///   # From file
+///   make-binidx -i data.jsonl -o output -t tokenizer.json -p config.toml
+///
+///   # From stdin (auto-detected)
+///   cat data.jsonl | make-binidx -o output -t tokenizer.json -p config.toml
+///
+///   # Text-only mode for debugging
+///   make-binidx -i data.jsonl -p config.toml --text-only
 #[derive(Parser, Debug)]
 #[command(name = "make-binidx")]
 #[command(about = "Convert JSONL message requests to RWKV binidx format")]
 #[command(version)]
 struct Args {
-    /// Input JSONL file containing MessagesRequest objects
+    /// Input JSONL file containing MessagesRequest objects.
+    /// If omitted, reads from stdin (auto-detected when piped).
     #[arg(short, long)]
-    input: PathBuf,
+    input: Option<PathBuf>,
 
     /// Output file basename (creates .bin and .idx files)
     /// Required unless --text-only is set
@@ -47,10 +64,6 @@ struct Args {
     #[arg(long, default_value = "4096")]
     ctx_len: usize,
 
-    /// Number of times to repeat and shuffle the data (default: 1)
-    #[arg(long, default_value = "1")]
-    repeat: usize,
-
     /// Output formatted prompts to stdout instead of generating binidx
     #[arg(long)]
     text_only: bool,
@@ -60,28 +73,54 @@ struct Args {
     separator: String,
 }
 
-/// Read and parse JSONL file into MessagesRequest objects.
-fn read_jsonl(path: &PathBuf) -> Result<Vec<MessagesRequest>> {
-    let file = File::open(path).with_context(|| format!("Failed to open {:?}", path))?;
-    let reader = BufReader::new(file);
+/// Input source for JSONL data.
+enum InputSource {
+    File(PathBuf),
+    Stdin,
+}
 
-    let mut requests = Vec::new();
-    for (line_num, line) in reader.lines().enumerate() {
-        let line = line.with_context(|| format!("Failed to read line {}", line_num + 1))?;
-        let line = line.trim();
-
-        // Skip empty lines
-        if line.is_empty() {
-            continue;
+/// Create a buffered reader from the input source.
+fn create_reader(source: &InputSource) -> Result<Box<dyn BufRead>> {
+    match source {
+        InputSource::File(path) => {
+            let file =
+                File::open(path).with_context(|| format!("Failed to open {:?}", path))?;
+            Ok(Box::new(BufReader::new(file)))
         }
+        InputSource::Stdin => Ok(Box::new(BufReader::new(io::stdin().lock()))),
+    }
+}
 
-        let request: MessagesRequest = serde_json::from_str(line)
-            .with_context(|| format!("Failed to parse line {} as MessagesRequest", line_num + 1))?;
+/// Determine the input source based on args and stdin state.
+fn get_input_source(args: &Args) -> Result<InputSource> {
+    match &args.input {
+        Some(path) => Ok(InputSource::File(path.clone())),
+        None => {
+            // Check if stdin is piped (not a terminal) using atty
+            if atty::is(atty::Stream::Stdin) {
+                anyhow::bail!(
+                    "No input specified and stdin is a terminal.\n\
+                     Use --input <file> or pipe data to stdin."
+                );
+            }
+            Ok(InputSource::Stdin)
+        }
+    }
+}
 
-        requests.push(request);
+/// Parse a single JSONL line into a MessagesRequest.
+fn parse_line(line: &str, line_num: usize) -> Result<Option<MessagesRequest>> {
+    let line = line.trim();
+
+    // Skip empty lines
+    if line.is_empty() {
+        return Ok(None);
     }
 
-    Ok(requests)
+    let request: MessagesRequest = serde_json::from_str(line)
+        .with_context(|| format!("Failed to parse line {} as MessagesRequest", line_num + 1))?;
+
+    Ok(Some(request))
 }
 
 /// Load config and extract PromptsConfig.
@@ -103,16 +142,27 @@ fn load_tokenizer(path: &PathBuf) -> Result<Tokenizer> {
     Tokenizer::new(&contents).with_context(|| format!("Failed to parse tokenizer {:?}", path))
 }
 
-/// Run text-only mode: print formatted prompts to stdout.
+/// Run text-only mode: print formatted prompts to stdout (streaming).
 fn run_text_only(args: &Args) -> Result<()> {
     eprintln!("Loading config from {:?}...", args.prompts_config);
     let config = load_prompts_config(&args.prompts_config)?;
 
-    eprintln!("Reading JSONL from {:?}...", args.input);
-    let requests = read_jsonl(&args.input)?;
-    eprintln!("Loaded {} requests", requests.len());
+    let source = get_input_source(args)?;
+    match &source {
+        InputSource::File(path) => eprintln!("Streaming from {:?}...", path),
+        InputSource::Stdin => eprintln!("Streaming from stdin..."),
+    }
 
-    for (i, req) in requests.iter().enumerate() {
+    let reader = create_reader(&source)?;
+    let mut count = 0usize;
+
+    for (line_num, line) in reader.lines().enumerate() {
+        let line = line.with_context(|| format!("Failed to read line {}", line_num + 1))?;
+
+        let Some(req) = parse_line(&line, line_num)? else {
+            continue;
+        };
+
         // Build prompt using exact server code path
         let prompt = build_prompt(
             req.system.as_deref(),
@@ -123,18 +173,19 @@ fn run_text_only(args: &Args) -> Result<()> {
         );
 
         // Print separator between prompts (not before first)
-        if i > 0 {
+        if count > 0 {
             println!("{}", args.separator);
         }
 
         println!("{}", prompt);
+        count += 1;
     }
 
-    eprintln!("\nProcessed {} prompts", requests.len());
+    eprintln!("\nProcessed {} prompts", count);
     Ok(())
 }
 
-/// Run binidx generation mode.
+/// Run binidx generation mode (streaming).
 fn run_binidx(args: &Args) -> Result<()> {
     let output_path = args.output.as_ref().unwrap();
     let tokenizer_path = args.tokenizer.as_ref().unwrap();
@@ -145,25 +196,34 @@ fn run_binidx(args: &Args) -> Result<()> {
     eprintln!("Loading config from {:?}...", args.prompts_config);
     let config = load_prompts_config(&args.prompts_config)?;
 
-    eprintln!("Reading JSONL from {:?}...", args.input);
-    let requests = read_jsonl(&args.input)?;
-    eprintln!("Loaded {} requests", requests.len());
+    let source = get_input_source(args)?;
+    match &source {
+        InputSource::File(path) => eprintln!("Streaming from {:?}...", path),
+        InputSource::Stdin => eprintln!("Streaming from stdin..."),
+    }
 
     eprintln!("Creating binidx files at {:?}...", output_path);
     let mut writer = BinidxWriter::new(output_path)?;
 
-    // Progress bar
-    let pb = ProgressBar::new(requests.len() as u64);
+    // Progress spinner (unknown total when streaming)
+    let pb = ProgressBar::new_spinner();
     pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-            .unwrap()
-            .progress_chars("#>-"),
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} [{elapsed_precise}] {pos} documents processed")
+            .unwrap(),
     );
 
+    let reader = create_reader(&source)?;
     let mut total_prompt_tokens = 0u64;
+    let mut doc_count = 0u64;
 
-    for req in &requests {
+    for (line_num, line) in reader.lines().enumerate() {
+        let line = line.with_context(|| format!("Failed to read line {}", line_num + 1))?;
+
+        let Some(req) = parse_line(&line, line_num)? else {
+            continue;
+        };
+
         // Build prompt using exact server code path
         let prompt = build_prompt(
             req.system.as_deref(),
@@ -184,10 +244,11 @@ fn run_binidx(args: &Args) -> Result<()> {
 
         total_prompt_tokens += tokens.len() as u64;
 
-        // Write to binidx (adds EOS token)
+        // Write to binidx immediately (adds EOS token)
         writer.add_document(&tokens)?;
 
-        pb.inc(1);
+        doc_count += 1;
+        pb.set_position(doc_count);
     }
 
     pb.finish_with_message("done");
@@ -232,6 +293,9 @@ fn main() -> Result<()> {
             anyhow::bail!("--tokenizer is required unless --text-only is set");
         }
     }
+
+    // Note: --input is validated in get_input_source() which checks for
+    // piped stdin when no input file is provided.
 
     if args.text_only {
         run_text_only(&args)

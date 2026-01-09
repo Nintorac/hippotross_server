@@ -35,5 +35,8 @@ rand = "0.8"
 # Progress
 indicatif = "0.17"
 
+# Terminal detection
+atty = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
