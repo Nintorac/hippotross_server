@@ -594,13 +594,22 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
                 .await;
         }
         (false, false) => {
-            // Simple streaming without parsing
-            respond_stream_simple(res, token_receiver, message_id, model_name, input_tokens).await;
+            // Streaming with optional thinking detection (model decides whether to think)
+            respond_stream_with_optional_thinking(
+                res,
+                token_receiver,
+                message_id,
+                model_name,
+                input_tokens,
+            )
+            .await;
         }
     }
 }
 
 /// Simple streaming handler without tool parsing.
+/// NOTE: Currently unused - kept for potential future use or debugging.
+#[allow(dead_code)]
 async fn respond_stream_simple(
     res: &mut Response,
     token_receiver: flume::Receiver<Token>,
@@ -647,6 +656,174 @@ async fn respond_stream_simple(
                     _ => Ok(emit_ping()),
                 }
             });
+
+    salvo::sse::stream(res, stream);
+}
+
+/// Streaming handler with optional thinking detection (model-initiated thinking).
+///
+/// Unlike `respond_stream_with_thinking` which assumes thinking mode is enabled and the
+/// model output starts inside a thinking block, this handler starts in detection mode
+/// and only creates thinking blocks if the model actually outputs `<think>` tags.
+///
+/// If the model outputs `<think>...</think>` tags:
+/// - Thinking block at index 0 with thinking_delta events
+/// - Text block at index 1 with text_delta events
+///
+/// If the model outputs plain text (no thinking tags):
+/// - Only text block at index 0 with text_delta events
+async fn respond_stream_with_optional_thinking(
+    res: &mut Response,
+    token_receiver: flume::Receiver<Token>,
+    message_id: String,
+    model_name: String,
+    input_tokens: usize,
+) {
+    use std::cell::RefCell;
+
+    // Shared state for the streaming handler
+    struct StreamState {
+        parser: ThinkingStreamParser,
+        output_tokens: usize,
+        thinking_block_started: bool,
+        text_block_started: bool,
+        message_started: bool,
+    }
+
+    let state = RefCell::new(StreamState {
+        parser: ThinkingStreamParser::new_detecting(),
+        output_tokens: 0,
+        thinking_block_started: false,
+        text_block_started: false,
+        message_started: false,
+    });
+
+    let stream = token_receiver.into_stream().flat_map(move |token| {
+        let mut events: Vec<Result<SseEvent, std::convert::Infallible>> = Vec::new();
+        let mut state = state.borrow_mut();
+
+        // Block index for thinking (always 0 if present)
+        let thinking_block_index = 0;
+
+        match token {
+            Token::Start => {
+                state.message_started = true;
+                events.push(Ok(emit_message_start(
+                    message_id.clone(),
+                    model_name.clone(),
+                    input_tokens,
+                )));
+            }
+            Token::Content(text) => {
+                state.output_tokens += 1;
+
+                // Feed token to parser
+                let result = state.parser.feed(&text);
+
+                // Emit text content BEFORE thinking (if model outputs text before <think>)
+                // This handles the case: "Hello <think>reasoning</think>answer"
+                if let Some(text_content) = &result.text {
+                    if !text_content.is_empty() && !state.thinking_block_started {
+                        // Text before any thinking - emit at index 0
+                        if !state.text_block_started {
+                            events.push(Ok(emit_content_block_start_text(0)));
+                            state.text_block_started = true;
+                        }
+                        events.push(Ok(emit_text_delta(0, text_content.clone())));
+                    }
+                }
+
+                // Emit thinking content if any
+                if let Some(thinking_text) = result.thinking {
+                    // Start thinking block if needed
+                    if !state.thinking_block_started {
+                        // If we had text before thinking, close that text block first
+                        if state.text_block_started {
+                            events.push(Ok(emit_content_block_stop(0)));
+                            state.text_block_started = false;
+                        }
+                        events.push(Ok(emit_content_block_start_thinking(thinking_block_index)));
+                        state.thinking_block_started = true;
+                    }
+                    events.push(Ok(emit_thinking_delta(thinking_block_index, thinking_text)));
+                }
+
+                // Check if thinking just completed
+                if result.thinking_complete && state.thinking_block_started {
+                    // Emit signature
+                    let signature = generate_thinking_signature(state.parser.thinking_content());
+                    events.push(Ok(emit_signature_delta(thinking_block_index, signature)));
+                    // Close thinking block
+                    events.push(Ok(emit_content_block_stop(thinking_block_index)));
+                }
+
+                // Emit text content AFTER thinking
+                if let Some(text_content) = result.text {
+                    if !text_content.is_empty() && state.thinking_block_started {
+                        // Text after thinking - emit at index 1
+                        let idx = 1;
+                        if !state.text_block_started {
+                            events.push(Ok(emit_content_block_start_text(idx)));
+                            state.text_block_started = true;
+                        }
+                        events.push(Ok(emit_text_delta(idx, text_content)));
+                    }
+                }
+            }
+            Token::Stop(reason, _counter) => {
+                // Finalize parser
+                let final_result = state.parser.finalize();
+
+                // Determine text block index based on whether thinking was ever started
+                let final_text_index = if state.thinking_block_started { 1 } else { 0 };
+
+                // Emit any remaining thinking
+                if let Some(thinking_text) = final_result.thinking {
+                    if !state.thinking_block_started {
+                        events.push(Ok(emit_content_block_start_thinking(thinking_block_index)));
+                        state.thinking_block_started = true;
+                    }
+                    events.push(Ok(emit_thinking_delta(thinking_block_index, thinking_text)));
+                }
+
+                // Close thinking block if still open
+                if final_result.thinking_complete && state.thinking_block_started {
+                    let signature = generate_thinking_signature(state.parser.thinking_content());
+                    events.push(Ok(emit_signature_delta(thinking_block_index, signature)));
+                    events.push(Ok(emit_content_block_stop(thinking_block_index)));
+                }
+
+                // Emit any remaining text
+                if let Some(text_content) = final_result.text {
+                    if !text_content.is_empty() {
+                        if !state.text_block_started {
+                            events.push(Ok(emit_content_block_start_text(final_text_index)));
+                            state.text_block_started = true;
+                        }
+                        events.push(Ok(emit_text_delta(final_text_index, text_content)));
+                    }
+                }
+
+                // Close text block if open
+                if state.text_block_started {
+                    let close_index = if state.thinking_block_started { 1 } else { 0 };
+                    events.push(Ok(emit_content_block_stop(close_index)));
+                }
+
+                // Emit message delta
+                let stop_reason: StopReason = reason.into();
+                events.push(Ok(emit_message_delta(stop_reason, state.output_tokens)));
+            }
+            Token::Done => {
+                events.push(Ok(emit_message_stop()));
+            }
+            _ => {
+                events.push(Ok(emit_ping()));
+            }
+        }
+
+        futures_util::stream::iter(events)
+    });
 
     salvo::sse::stream(res, stream);
 }
