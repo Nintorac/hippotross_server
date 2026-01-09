@@ -128,6 +128,7 @@ impl MessageContent {
     /// Tool-related blocks are formatted in Hermes/Qwen style:
     /// - ToolUse becomes `<tool_call>{"name": ..., "arguments": ...}</tool_call>`
     /// - ToolResult becomes `<tool_response>{"name": ..., "content": ...}</tool_response>`
+    /// - Thinking becomes `<think>...</think>` for training data alignment
     pub fn to_text(&self) -> String {
         match self {
             MessageContent::Text(s) => s.clone(),
@@ -135,7 +136,10 @@ impl MessageContent {
                 .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text { text } => Some(text.clone()),
-                    ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
+                    ContentBlock::Thinking { thinking, .. } => {
+                        // Wrap thinking in <think> tags for training data format
+                        Some(format!("<think>{}</think>", thinking))
+                    }
                     ContentBlock::ToolUse { name, input, .. } => {
                         // Format as Hermes-style tool_call for context in continued conversations
                         let call = serde_json::json!({
@@ -621,5 +625,53 @@ impl MessagesResponse {
     pub fn with_stop_sequence(mut self, sequence: String) -> Self {
         self.stop_sequence = Some(sequence);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thinking_block_to_text() {
+        let content = MessageContent::Blocks(vec![ContentBlock::Thinking {
+            thinking: "This is my reasoning.".to_string(),
+            signature: "sig".to_string(),
+        }]);
+
+        let text = content.to_text();
+        assert_eq!(text, "<think>This is my reasoning.</think>");
+    }
+
+    #[test]
+    fn test_mixed_content_blocks_to_text() {
+        let content = MessageContent::Blocks(vec![
+            ContentBlock::Thinking {
+                thinking: "Let me think...".to_string(),
+                signature: "sig".to_string(),
+            },
+            ContentBlock::Text {
+                text: "Here is my response.".to_string(),
+            },
+        ]);
+
+        let text = content.to_text();
+        assert!(text.contains("<think>Let me think...</think>"));
+        assert!(text.contains("Here is my response."));
+    }
+
+    #[test]
+    fn test_tool_use_to_text() {
+        let content = MessageContent::Blocks(vec![ContentBlock::ToolUse {
+            id: "tool_123".to_string(),
+            name: "get_weather".to_string(),
+            input: serde_json::json!({"location": "Paris"}),
+        }]);
+
+        let text = content.to_text();
+        assert!(text.contains("<tool_call>"));
+        assert!(text.contains("</tool_call>"));
+        assert!(text.contains("get_weather"));
+        assert!(text.contains("Paris"));
     }
 }
