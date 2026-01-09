@@ -165,7 +165,11 @@ impl GenerateContext {
         sender: Sender<Token>,
         tokenizer: &Tokenizer,
     ) -> Result<Self> {
-        let tokens = Tokens(tokenizer.encode(request.prompt.as_bytes())?);
+        // Prefix with token 0 (EOS) for RWKV performance optimization
+        // See: https://huggingface.co/BlinkDL/rwkv7-g1
+        let mut token_vec = vec![0u32];
+        token_vec.extend(tokenizer.encode(request.prompt.as_bytes())?);
+        let tokens = Tokens(token_vec);
         let model_tokens = Tokens(tokenizer.encode(request.model_text.as_bytes())?);
 
         // init sampler state here
