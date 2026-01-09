@@ -6,6 +6,7 @@
 pub mod bnf_generator;
 pub mod bnf_grammars;
 mod handler;
+pub mod prompt;
 mod streaming;
 mod thinking_extractor;
 mod tool_parser;
