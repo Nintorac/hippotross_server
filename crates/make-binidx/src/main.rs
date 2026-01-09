@@ -3,6 +3,8 @@
 //! This tool reads JSONL files containing `/v1/messages` requests and converts
 //! them to the binidx format used for RWKV model fine-tuning.
 
+mod binidx;
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
