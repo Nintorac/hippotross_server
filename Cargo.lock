@@ -2726,6 +2726,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 
 [[package]]
+name = "make-binidx"
+version = "0.6.2"
+dependencies = [
+ "ai00-server",
+ "anyhow",
+ "clap",
+ "indicatif",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "web-rwkv",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

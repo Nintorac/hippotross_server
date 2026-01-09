@@ -49,17 +49,17 @@ response::=#'[^\\x00]*';
 ///
 /// Enforces the structure:
 /// - Optional text before/after tool calls
-/// - Tool calls wrapped in `<tool_use>...</tool_use>` tags
-/// - Tool JSON must have `name` and `input` fields
+/// - Tool calls wrapped in `<tool_call>...</tool_call>` tags
+/// - Tool JSON must have `name` and `arguments` fields
 ///
 /// Note: This grammar validates structure only, not the actual tool names
 /// or input schemas. Use SchemaAware level for full validation.
 pub const GRAMMAR_TOOLS_ONLY: &str = r#"
 start::=text_or_tools;
 text_or_tools::=text? tool_sequence?;
-tool_sequence::=tool_use text? tool_sequence?;
-tool_use::='<tool_use>' ws tool_json ws '</tool_use>';
-tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"input"' ws ':' ws json_object ws '}';
+tool_sequence::=tool_call_block text? tool_sequence?;
+tool_call_block::='<tool_call>' ws tool_json ws '</tool_call>';
+tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"arguments"' ws ':' ws json_object ws '}';
 text::=#'[^<]*';
 "#;
 
@@ -75,9 +75,9 @@ start::=thinking_block? text_or_tools;
 thinking_block::='<think>' thinking_content '</think>' ws;
 thinking_content::=#'[^<]*';
 text_or_tools::=text? tool_sequence?;
-tool_sequence::=tool_use text? tool_sequence?;
-tool_use::='<tool_use>' ws tool_json ws '</tool_use>';
-tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"input"' ws ':' ws json_object ws '}';
+tool_sequence::=tool_call_block text? tool_sequence?;
+tool_call_block::='<tool_call>' ws tool_json ws '</tool_call>';
+tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"arguments"' ws ':' ws json_object ws '}';
 text::=#'[^<]*';
 "#;
 
@@ -174,12 +174,12 @@ mod tests {
     #[test]
     fn test_grammar_tools_only_structure() {
         assert!(GRAMMAR_TOOLS_ONLY.contains("start::="));
-        assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_use>"));
-        assert!(GRAMMAR_TOOLS_ONLY.contains("</tool_use>"));
+        assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_call>"));
+        assert!(GRAMMAR_TOOLS_ONLY.contains("</tool_call>"));
         assert!(GRAMMAR_TOOLS_ONLY.contains("tool_json"));
         // Check for JSON field names in the grammar
         assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"name"'"#));
-        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"input"'"#));
+        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"arguments"'"#));
     }
 
     #[test]
@@ -187,8 +187,8 @@ mod tests {
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("start::="));
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<think>"));
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("</think>"));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_use>"));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("</tool_use>"));
+        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_call>"));
+        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("</tool_call>"));
         assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("thinking_block"));
     }
 
@@ -197,14 +197,14 @@ mod tests {
         let grammar = build_structural_grammar(true, false);
         assert!(grammar.contains("json_object")); // From primitives
         assert!(grammar.contains("<think>")); // From thinking
-        assert!(!grammar.contains("<tool_use>")); // No tools
+        assert!(!grammar.contains("<tool_call>")); // No tools
     }
 
     #[test]
     fn test_build_structural_grammar_tools_only() {
         let grammar = build_structural_grammar(false, true);
         assert!(grammar.contains("json_object")); // From primitives
-        assert!(grammar.contains("<tool_use>")); // From tools
+        assert!(grammar.contains("<tool_call>")); // From tools
         assert!(!grammar.contains("<think>")); // No thinking
     }
 
@@ -213,7 +213,7 @@ mod tests {
         let grammar = build_structural_grammar(true, true);
         assert!(grammar.contains("json_object")); // From primitives
         assert!(grammar.contains("<think>")); // From combined
-        assert!(grammar.contains("<tool_use>")); // From combined
+        assert!(grammar.contains("<tool_call>")); // From combined
     }
 
     #[test]
@@ -222,7 +222,7 @@ mod tests {
         assert!(grammar.contains("json_object")); // From primitives
         assert!(grammar.contains("start::=")); // Has start rule
         assert!(!grammar.contains("<think>"));
-        assert!(!grammar.contains("<tool_use>"));
+        assert!(!grammar.contains("<tool_call>"));
     }
 
     #[test]
