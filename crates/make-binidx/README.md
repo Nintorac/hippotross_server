@@ -76,6 +76,34 @@ make-binidx \
 \* Required unless piped from stdin
 \*\* Required unless `--text-only` is set
 
+## Dataset Conversion
+
+### Toucan-1.5M Dataset
+
+The `toucan_to_messages.py` script converts the [Toucan-1.5M](https://huggingface.co/datasets/Agent-Ark/Toucan-1.5M) dataset to MessagesRequest format. It streams directly from HuggingFace using DuckDB.
+
+```bash
+# Convert and pipe directly to make-binidx
+./toucan_to_messages.py --limit 10000 | make-binidx \
+  -o toucan_train \
+  -t assets/tokenizer/rwkv_vocab_v20230424.json \
+  -p assets/configs/Config.toml
+
+# Preview sample conversion
+./toucan_to_messages.py --sample
+
+# Convert to JSONL file first
+./toucan_to_messages.py --limit 1000 > toucan_sample.jsonl
+```
+
+The script handles:
+- Tool calls (`tool_call` role → `tool_use` content blocks)
+- Tool responses (`tool_response` role → `tool_result` content blocks)
+- OpenAI-style tools → Anthropic-style tool definitions
+- Streaming I/O for memory efficiency
+
+**Note:** The script is tested with the `SFT` subset. Other subsets (Qwen3-32B, Kimi-K2, GPT-OSS-120B) may have different schemas and would require additional work to extract the correct message/tool configuration
+
 ## Input Format
 
 Standard `/v1/messages` request format, one per line:
