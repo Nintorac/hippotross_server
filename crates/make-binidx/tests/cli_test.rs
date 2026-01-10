@@ -186,12 +186,11 @@ fn test_binidx_from_file() {
     let bin_size = fs::metadata(&bin_path).unwrap().len();
     assert!(bin_size > 0, "Empty .bin file");
 
-    // Verify .idx has valid header
+    // Verify .idx has valid header (Megatron MMapIndexedDataset format)
     let mut idx_file = File::open(&idx_path).unwrap();
-    let mut magic_bytes = [0u8; 8];
+    let mut magic_bytes = [0u8; 9];
     idx_file.read_exact(&mut magic_bytes).unwrap();
-    let magic = u64::from_le_bytes(magic_bytes);
-    assert_eq!(magic, 0x584449, "Invalid idx magic number");
+    assert_eq!(&magic_bytes, b"MMIDIDX\x00\x00", "Invalid idx magic number");
 }
 
 #[test]
