@@ -64,6 +64,10 @@ struct Args {
     #[arg(long, default_value = "4096")]
     ctx_len: usize,
 
+    /// Skip rows with more than N tokens (optional filter)
+    #[arg(long)]
+    max_tokens: Option<usize>,
+
     /// Output formatted prompts to stdout instead of generating binidx
     #[arg(long)]
     text_only: bool,
@@ -216,6 +220,7 @@ fn run_binidx(args: &Args) -> Result<()> {
     let reader = create_reader(&source)?;
     let mut total_prompt_tokens = 0u64;
     let mut doc_count = 0u64;
+    let mut skipped_count = 0u64;
 
     for (line_num, line) in reader.lines().enumerate() {
         let line = line.with_context(|| format!("Failed to read line {}", line_num + 1))?;
@@ -242,6 +247,14 @@ fn run_binidx(args: &Args) -> Result<()> {
                 .with_context(|| "Failed to tokenize prompt")?,
         );
 
+        // Skip if exceeds max_tokens filter
+        if let Some(max) = args.max_tokens {
+            if tokens.len() > max {
+                skipped_count += 1;
+                continue;
+            }
+        }
+
         total_prompt_tokens += tokens.len() as u64;
 
         // Write to binidx immediately (adds EOS token)
@@ -258,6 +271,9 @@ fn run_binidx(args: &Args) -> Result<()> {
 
     eprintln!("\n=== Statistics ===");
     eprintln!("Documents:    {}", stats.num_documents);
+    if skipped_count > 0 {
+        eprintln!("Skipped:      {} (exceeded --max-tokens {})", skipped_count, args.max_tokens.unwrap());
+    }
     eprintln!("Total tokens: {} (including EOS markers)", stats.total_tokens);
     eprintln!("Prompt tokens: {} (before EOS)", total_prompt_tokens);
     eprintln!(

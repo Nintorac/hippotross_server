@@ -70,6 +70,7 @@ make-binidx \
 | `-t, --tokenizer <FILE>` | Yes** | Path to tokenizer JSON file |
 | `-p, --prompts-config <FILE>` | Yes | Path to prompts config TOML file |
 | `--ctx-len <N>` | No | Context length for stats (default: 4096) |
+| `--max-tokens <N>` | No | Skip rows with more than N tokens |
 | `--text-only` | No | Output prompts as text instead of binidx |
 | `--separator <STR>` | No | Separator for text-only mode (default: "---") |
 
