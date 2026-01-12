@@ -1287,74 +1287,63 @@ fn test_bnf_schema_and_validation_together() {
 
 use ai00_server::api::messages::bnf_generator::generate_bnf_schema;
 use ai00_server::api::messages::bnf_grammars::{
-    build_structural_grammar, GRAMMAR_JSON_PRIMITIVES, GRAMMAR_THINKING_ONLY,
-    GRAMMAR_THINKING_PLUS_TOOLS, GRAMMAR_TOOLS_ONLY,
+    build_structural_grammar, GRAMMAR_JSON_PRIMITIVES, GRAMMAR_UNIFIED,
 };
 
 /// Test that generate_bnf_schema returns None for None level.
 #[test]
 fn test_integration_generate_bnf_schema_none_level() {
-    let result = generate_bnf_schema(None, false, BnfValidationLevel::None);
+    let stop_seqs = vec!["\n\n".to_string()];
+
+    let result = generate_bnf_schema(None, false, BnfValidationLevel::None, &stop_seqs);
     assert!(result.is_none());
 
-    let result = generate_bnf_schema(None, true, BnfValidationLevel::None);
+    let result = generate_bnf_schema(None, true, BnfValidationLevel::None, &stop_seqs);
     assert!(result.is_none());
 }
 
-/// Test Structural level generates thinking-only grammar.
+/// Test Structural level generates unified grammar with all features.
+/// The unified grammar always includes both thinking and tool support (both optional).
 #[test]
-fn test_integration_structural_thinking_only() {
-    let result = generate_bnf_schema(None, true, BnfValidationLevel::Structural);
+fn test_integration_structural_unified_grammar() {
+    let stop_seqs = vec!["\n\n".to_string()];
+
+    // All parameter combinations produce the same unified grammar
+    let result = generate_bnf_schema(None, false, BnfValidationLevel::Structural, &stop_seqs);
     assert!(result.is_some());
 
     let grammar = result.unwrap();
-    // Should contain thinking tags
+    // Unified grammar always contains both thinking and tool tags
     assert!(grammar.contains("<think>"));
     assert!(grammar.contains("</think>"));
-    // Should NOT contain tool tags
-    assert!(!grammar.contains("<tool_call>"));
-    // Should contain JSON primitives
-    assert!(grammar.contains("json_object"));
-}
-
-/// Test Structural level generates tools-only grammar.
-#[test]
-fn test_integration_structural_tools_only() {
-    let tools = vec![Tool {
-        name: "test_tool".to_string(),
-        description: Some("Test description".to_string()),
-        input_schema: json!({"type": "object"}),
-        cache_control: None,
-    }];
-
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::Structural);
-    assert!(result.is_some());
-
-    let grammar = result.unwrap();
-    // Should contain tool tags
     assert!(grammar.contains("<tool_call>"));
     assert!(grammar.contains("</tool_call>"));
-    // Should NOT contain thinking tags
-    assert!(!grammar.contains("<think>"));
+    // Should contain JSON primitives
+    assert!(grammar.contains("json_object"));
+    // Should use complement regex
+    assert!(grammar.contains("#ex'"));
 }
 
-/// Test Structural level generates combined grammar for thinking + tools.
+/// Test Structural level produces same grammar regardless of parameters.
 #[test]
-fn test_integration_structural_thinking_and_tools() {
+fn test_integration_structural_all_params_same_grammar() {
     let tools = vec![Tool {
         name: "test_tool".to_string(),
         description: Some("Test description".to_string()),
         input_schema: json!({"type": "object"}),
         cache_control: None,
     }];
+    let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::Structural);
-    assert!(result.is_some());
+    // All combinations should produce identical grammar
+    let g1 = generate_bnf_schema(None, false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+    let g2 = generate_bnf_schema(None, true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+    let g3 = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+    let g4 = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
 
-    let grammar = result.unwrap();
-    // Should contain both thinking and tool tags
-    assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<tool_call>"));
+    assert_eq!(g1, g2, "thinking param should not affect unified grammar");
+    assert_eq!(g2, g3, "tools param should not affect unified grammar");
+    assert_eq!(g3, g4, "both params should not affect unified grammar");
 }
 
 /// Test SchemaAware level generates tool-specific grammars.
@@ -1376,8 +1365,9 @@ fn test_integration_schema_aware_with_tools() {
         }),
         cache_control: None,
     }];
+    let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware);
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1386,11 +1376,11 @@ fn test_integration_schema_aware_with_tools() {
     assert!(grammar.contains("get_weather_call"));
     assert!(grammar.contains("get_weather_input"));
 
-    // Should have tool dispatch rule
-    assert!(grammar.contains("tool_call::="));
-
     // Should have enum values from schema
     assert!(grammar.contains("celsius") || grammar.contains("fahrenheit"));
+
+    // SchemaAware also includes thinking (unified approach)
+    assert!(grammar.contains("<think>"));
 }
 
 /// Test SchemaAware with multiple tools generates dispatch rule.
@@ -1418,8 +1408,9 @@ fn test_integration_schema_aware_multiple_tools() {
             cache_control: None,
         },
     ];
+    let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware);
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1427,29 +1418,27 @@ fn test_integration_schema_aware_multiple_tools() {
     // Should have both tool-specific rules
     assert!(grammar.contains("get_weather_call"));
     assert!(grammar.contains("search_call"));
-
-    // Dispatch rule should have alternation
-    assert!(grammar.contains("tool_call::="));
-    assert!(grammar.contains(" | "));
 }
 
-/// Test SchemaAware with thinking enabled includes thinking block.
+/// Test SchemaAware always includes thinking (unified grammar).
 #[test]
-fn test_integration_schema_aware_with_thinking() {
+fn test_integration_schema_aware_always_has_thinking() {
     let tools = vec![Tool {
         name: "test_tool".to_string(),
         description: Some("Test".to_string()),
         input_schema: json!({"type": "object"}),
         cache_control: None,
     }];
+    let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::SchemaAware);
+    // Even with thinking=false, unified grammar includes thinking
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
     assert!(result.is_some());
 
     let grammar = result.unwrap();
 
-    // Should have thinking block
-    assert!(grammar.contains("thinking_block"));
+    // Should have thinking support (unified grammar)
+    assert!(grammar.contains("thinking"));
     assert!(grammar.contains("<think>"));
 
     // Should also have tool rules
@@ -1459,43 +1448,38 @@ fn test_integration_schema_aware_with_thinking() {
 /// Test grammar constants are valid KBNF.
 #[test]
 fn test_integration_grammar_constants_structure() {
-    // Each constant should have rule definitions (::=) and semicolons
+    // JSON primitives constant
     assert!(GRAMMAR_JSON_PRIMITIVES.contains("::="));
     assert!(GRAMMAR_JSON_PRIMITIVES.contains(";"));
+    assert!(GRAMMAR_JSON_PRIMITIVES.contains("json_object"));
 
-    assert!(GRAMMAR_THINKING_ONLY.contains("::="));
-    assert!(GRAMMAR_THINKING_ONLY.contains("<think>"));
-
-    assert!(GRAMMAR_TOOLS_ONLY.contains("::="));
-    assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_call>"));
-
-    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("::="));
-    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<think>"));
-    assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_call>"));
+    // Unified grammar constant
+    assert!(GRAMMAR_UNIFIED.contains("::="));
+    assert!(GRAMMAR_UNIFIED.contains("<think>"));
+    assert!(GRAMMAR_UNIFIED.contains("<tool_call>"));
+    assert!(GRAMMAR_UNIFIED.contains("#ex'")); // Complement regex
 }
 
-/// Test build_structural_grammar helper.
+/// Test build_structural_grammar helper produces unified grammar.
 #[test]
 fn test_integration_build_structural_grammar() {
-    // No features - should still have start rule
-    let grammar = build_structural_grammar(false, false);
-    assert!(grammar.contains("start::="));
-    assert!(grammar.contains("json_object"));
+    let stop_seqs = vec!["\n\n".to_string()];
 
-    // Thinking only
-    let grammar = build_structural_grammar(true, false);
-    assert!(grammar.contains("<think>"));
-    assert!(!grammar.contains("<tool_call>"));
+    // All combinations produce unified grammar with both features
+    for (thinking, tools) in [(false, false), (true, false), (false, true), (true, true)] {
+        let grammar = build_structural_grammar(thinking, tools, &stop_seqs);
 
-    // Tools only
-    let grammar = build_structural_grammar(false, true);
-    assert!(grammar.contains("<tool_call>"));
-    assert!(!grammar.contains("<think>"));
+        // Unified grammar always has start rule
+        assert!(grammar.contains("start::="), "Missing start for ({}, {})", thinking, tools);
+        assert!(grammar.contains("json_object"), "Missing json_object for ({}, {})", thinking, tools);
 
-    // Both
-    let grammar = build_structural_grammar(true, true);
-    assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<tool_call>"));
+        // Unified grammar always has both (both are optional in the grammar)
+        assert!(grammar.contains("<think>"), "Missing <think> for ({}, {})", thinking, tools);
+        assert!(grammar.contains("<tool_call>"), "Missing <tool_call> for ({}, {})", thinking, tools);
+
+        // Should have terminator
+        assert!(grammar.contains("terminator::="), "Missing terminator for ({}, {})", thinking, tools);
+    }
 }
 
 /// Test grammar generation with complex nested schema.
@@ -1522,8 +1506,9 @@ fn test_integration_schema_aware_nested_schema() {
         }),
         cache_control: None,
     }];
+    let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware);
+    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1535,19 +1520,23 @@ fn test_integration_schema_aware_nested_schema() {
 }
 
 /// Test SchemaAware fallback when no tools provided.
+/// With unified grammar, it always returns the structural grammar (thinking and tools are optional).
 #[test]
 fn test_integration_schema_aware_no_tools_fallback() {
-    // No tools, but thinking enabled - should fall back to thinking-only
-    let result = generate_bnf_schema(None, true, BnfValidationLevel::SchemaAware);
+    let stop_seqs = vec!["\n\n".to_string()];
+
+    // No tools - should fall back to unified structural grammar
+    let result = generate_bnf_schema(None, true, BnfValidationLevel::SchemaAware, &stop_seqs);
     assert!(result.is_some());
 
     let grammar = result.unwrap();
+    // Unified grammar always has both
     assert!(grammar.contains("<think>"));
-    assert!(!grammar.contains("tool_call"));
+    assert!(grammar.contains("<tool_call>"));
 
-    // No tools, no thinking - should return None
-    let result = generate_bnf_schema(None, false, BnfValidationLevel::SchemaAware);
-    assert!(result.is_none());
+    // No tools, no thinking - still returns unified grammar
+    let result = generate_bnf_schema(None, false, BnfValidationLevel::SchemaAware, &stop_seqs);
+    assert!(result.is_some()); // Changed: now always returns unified grammar
 }
 
 // =============================================================================

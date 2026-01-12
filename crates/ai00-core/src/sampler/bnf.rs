@@ -39,10 +39,14 @@ impl Formatter for BnfSampler {
     }
 
     fn update(&mut self, token: u32) -> bool {
+        // Grammar "Finished" means "satisfied, could end here" - not "must stop".
+        // Let stop strings and EOS token control when to actually stop.
+        // Only halt on actual errors (invalid token rejected by grammar).
         let halt = match self.0.try_accept_new_token(token) {
-            Ok(AcceptTokenResult::Finished) | Err(AcceptTokenError::Finished) => true,
+            Ok(AcceptTokenResult::Finished) => false,  // Satisfied but can continue
             Ok(AcceptTokenResult::Ongoing) => false,
-            Err(_) => self.0.is_finished(),
+            Err(AcceptTokenError::Finished) => false,  // Also don't halt
+            Err(_) => true,  // Invalid token - halt
         };
         self.0.compute_allowed_token_ids();
         halt

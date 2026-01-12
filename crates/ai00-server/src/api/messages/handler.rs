@@ -35,7 +35,10 @@ use ai00_core::sampler::nucleus::{NucleusParams, NucleusSampler};
 /// 3. If raw `bnf_schema` is provided, use that (only when validation is None)
 ///
 /// Returns (effective_level, schema_to_use).
-fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<String>) {
+fn resolve_bnf_config(
+    req: &MessagesRequest,
+    stop_sequences: &[String],
+) -> (BnfValidationLevel, Option<String>) {
     let has_tools = req.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
     let has_thinking = req
         .thinking
@@ -50,7 +53,6 @@ fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<Stri
         // Not set - auto-enable Structural if tools/thinking present
         None => {
             if has_tools || has_thinking {
-                // Auto-enable Structural validation for structured output
                 BnfValidationLevel::Structural
             } else {
                 BnfValidationLevel::None
@@ -76,8 +78,13 @@ fn resolve_bnf_config(req: &MessagesRequest) -> (BnfValidationLevel, Option<Stri
             }
         }
         BnfValidationLevel::Structural | BnfValidationLevel::SchemaAware => {
-            // Generate grammar based on validation level
-            generate_bnf_schema(req.tools.as_deref(), has_thinking, effective_level)
+            // Generate grammar based on validation level, with stop sequences for terminator
+            generate_bnf_schema(
+                req.tools.as_deref(),
+                has_thinking,
+                effective_level,
+                stop_sequences,
+            )
         }
     };
 
@@ -123,7 +130,7 @@ fn to_generate_request(req: &MessagesRequest, prompts: &PromptsConfig) -> Genera
     })));
 
     // Resolve BNF validation level and get effective schema
-    let (_effective_level, bnf_schema) = resolve_bnf_config(req);
+    let (_effective_level, bnf_schema) = resolve_bnf_config(req, &stop);
 
     GenerateRequest {
         prompt,

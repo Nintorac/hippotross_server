@@ -1,9 +1,19 @@
-//! Stage 1 structural BNF grammar constants for constrained decoding.
+//! Unified structural BNF grammar for constrained decoding.
 //!
-//! These grammars enforce correct syntax for thinking tags, tool calls, and JSON
-//! without requiring schema-specific validation (that's Stage 2).
+//! This module provides a single unified grammar that handles all combinations
+//! of thinking blocks, tool calls, and plain text responses. The grammar always
+//! allows optional thinking, preventing conflicts when models spontaneously decide
+//! to "think" regardless of configuration.
 //!
 //! Grammar format: KBNF (Koishi's BNF) - see spec Part 8.2 for syntax reference.
+//!
+//! ## Key Design Decisions
+//!
+//! - `#ex'pattern'` = KBNF complement regex (matches text NOT containing pattern)
+//! - `</tool_call>` acts as implicit terminator (no `\n\n` needed after)
+//! - Single tool call per turn (system injects response, model continues)
+//! - Only text-only responses require explicit terminator
+//! - Allows `<` in text before tool calls (e.g., "2 < 3")
 
 /// Generic JSON grammar primitives.
 ///
@@ -29,56 +39,34 @@ number::=#'-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?';
 ws::=#'[ \\t\\n\\r]*';
 "#;
 
-/// Thinking-only grammar for extended thinking mode.
+/// Unified structural grammar for all response types.
 ///
-/// Enforces the structure:
-/// - Optional `<think>...</think>` block at the start
-/// - Followed by a response
+/// This grammar handles all combinations:
+/// - Plain text responses (requires terminator)
+/// - Thinking + text responses (requires terminator)
+/// - Tool call responses (terminates at `</tool_call>`)
+/// - Thinking + tool call responses (terminates at `</tool_call>`)
 ///
-/// The thinking content allows any characters except the closing tag,
-/// enabling free-form reasoning inside the thinking block.
-pub const GRAMMAR_THINKING_ONLY: &str = r#"
-start::=thinking_response | plain_response;
-thinking_response::='<think>' thinking_content '</think>' ws response;
-thinking_content::=#'[^<]*';
-plain_response::=response;
-response::=#'[^\\x00]*';
-"#;
-
-/// Tool call structure grammar without schema validation.
+/// The grammar uses KBNF's complement regex (`#ex'pattern'`) to match text
+/// that does not contain specific tags, allowing `<` characters in regular text.
 ///
-/// Enforces the structure:
-/// - Optional text before/after tool calls
-/// - Tool calls wrapped in `<tool_call>...</tool_call>` tags
-/// - Tool JSON must have `name` and `arguments` fields
+/// ## Structure
 ///
-/// Note: This grammar validates structure only, not the actual tool names
-/// or input schemas. Use SchemaAware level for full validation.
-pub const GRAMMAR_TOOLS_ONLY: &str = r#"
-start::=text_or_tools;
-text_or_tools::=text? tool_sequence?;
-tool_sequence::=tool_call_block text? tool_sequence?;
-tool_call_block::='<tool_call>' ws tool_json ws '</tool_call>';
+/// ```text
+/// start ::= thinking? content
+/// thinking ::= '<think>' ... '</think>'
+/// content ::= tool_call | text_response
+/// ```
+///
+/// Tool calls terminate the grammar (allowing tool response injection).
+/// Text-only responses require an explicit terminator (e.g., `\n\n`).
+pub const GRAMMAR_UNIFIED: &str = r#"
+start::=thinking? content;
+thinking::='<think>' #ex'</think>' '</think>' ws;
+content::=tool_call | text_response;
+tool_call::=#ex'<tool_call>' '<tool_call>' ws tool_json ws '</tool_call>';
+text_response::=#'.*' terminator;
 tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"arguments"' ws ':' ws json_object ws '}';
-text::=#'[^<]*';
-"#;
-
-/// Combined grammar for thinking blocks with tool calls.
-///
-/// Enforces the structure:
-/// - Optional `<think>...</think>` block at the start
-/// - Followed by optional text and tool calls
-///
-/// This grammar is used when both extended thinking and tools are enabled.
-pub const GRAMMAR_THINKING_PLUS_TOOLS: &str = r#"
-start::=thinking_block? text_or_tools;
-thinking_block::='<think>' thinking_content '</think>' ws;
-thinking_content::=#'[^<]*';
-text_or_tools::=text? tool_sequence?;
-tool_sequence::=tool_call_block text? tool_sequence?;
-tool_call_block::='<tool_call>' ws tool_json ws '</tool_call>';
-tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"arguments"' ws ':' ws json_object ws '}';
-text::=#'[^<]*';
 "#;
 
 /// Thinking wrapper for user-provided grammars.
@@ -89,35 +77,68 @@ text::=#'[^<]*';
 /// Usage: Prepend to user's grammar where their start rule becomes `user_start`.
 pub const GRAMMAR_THINKING_WRAPPER: &str = r#"
 start::=thinking_block? user_start;
-thinking_block::='<think>' thinking_content '</think>' ws;
-thinking_content::=#'[^<]*';
+thinking_block::='<think>' #ex'</think>' '</think>' ws;
 ws::=#'[ \\t\\n\\r]*';
 "#;
 
-/// Build a complete structural grammar based on features enabled.
+/// Build the terminator rule from stop sequences.
 ///
-/// Combines the appropriate grammar constants based on what's needed:
-/// - Base JSON primitives are always included
-/// - Thinking grammar when thinking is enabled
-/// - Tools grammar when tools are present
-/// - Combined grammar when both are enabled
-pub fn build_structural_grammar(thinking_enabled: bool, tools_present: bool) -> String {
+/// Generates a rule like: `terminator::='\n\n' | '</s>' | '\n';`
+pub fn build_terminator_rule(stop_sequences: &[String]) -> String {
+    if stop_sequences.is_empty() {
+        // Default to double newline if no stop sequences
+        return "terminator::='\\n\\n';\n".to_string();
+    }
+
+    let alternatives: Vec<String> = stop_sequences
+        .iter()
+        .map(|s| {
+            // Escape special characters for KBNF
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
+            format!("'{}'", escaped)
+        })
+        .collect();
+
+    format!("terminator::={};\n", alternatives.join(" | "))
+}
+
+/// Build a complete structural grammar for constrained decoding.
+///
+/// Uses the unified grammar that always allows optional thinking blocks
+/// and handles both tool calls and text responses. The grammar parameters
+/// are kept for API compatibility but the unified grammar handles all cases.
+///
+/// ## Arguments
+///
+/// * `_thinking_enabled` - Ignored; thinking is always optional in unified grammar
+/// * `_tools_present` - Ignored; tool calls are always allowed in unified grammar
+/// * `stop_sequences` - Stop sequences used to build the terminator rule
+///
+/// ## Returns
+///
+/// A complete KBNF grammar string ready for the BNF sampler.
+pub fn build_structural_grammar(
+    _thinking_enabled: bool,
+    _tools_present: bool,
+    stop_sequences: &[String],
+) -> String {
     let mut grammar = String::new();
 
     // Always include JSON primitives as base
     grammar.push_str(GRAMMAR_JSON_PRIMITIVES);
     grammar.push('\n');
 
-    // Add feature-specific grammar
-    match (thinking_enabled, tools_present) {
-        (true, true) => grammar.push_str(GRAMMAR_THINKING_PLUS_TOOLS),
-        (true, false) => grammar.push_str(GRAMMAR_THINKING_ONLY),
-        (false, true) => grammar.push_str(GRAMMAR_TOOLS_ONLY),
-        (false, false) => {
-            // No special structure needed - just allow any text
-            grammar.push_str("start::=#'[^\\x00]*';\n");
-        }
-    }
+    // Use unified grammar for all cases
+    grammar.push_str(GRAMMAR_UNIFIED);
+    grammar.push('\n');
+
+    // Add terminator rule based on stop sequences
+    grammar.push_str(&build_terminator_rule(stop_sequences));
 
     grammar
 }
@@ -164,65 +185,83 @@ mod tests {
     }
 
     #[test]
-    fn test_grammar_thinking_only_structure() {
-        assert!(GRAMMAR_THINKING_ONLY.contains("start::="));
-        assert!(GRAMMAR_THINKING_ONLY.contains("<think>"));
-        assert!(GRAMMAR_THINKING_ONLY.contains("</think>"));
-        assert!(GRAMMAR_THINKING_ONLY.contains("thinking_content"));
+    fn test_grammar_unified_structure() {
+        // Unified grammar should have start rule
+        assert!(GRAMMAR_UNIFIED.contains("start::="));
+
+        // Should support thinking (optional)
+        assert!(GRAMMAR_UNIFIED.contains("thinking"));
+        assert!(GRAMMAR_UNIFIED.contains("<think>"));
+        assert!(GRAMMAR_UNIFIED.contains("</think>"));
+
+        // Should support tool calls
+        assert!(GRAMMAR_UNIFIED.contains("tool_call"));
+        assert!(GRAMMAR_UNIFIED.contains("<tool_call>"));
+        assert!(GRAMMAR_UNIFIED.contains("</tool_call>"));
+
+        // Should have tool JSON structure
+        assert!(GRAMMAR_UNIFIED.contains("tool_json"));
+        assert!(GRAMMAR_UNIFIED.contains(r#"'"name"'"#));
+        assert!(GRAMMAR_UNIFIED.contains(r#"'"arguments"'"#));
+
+        // Should have text response with terminator
+        assert!(GRAMMAR_UNIFIED.contains("text_response"));
+        assert!(GRAMMAR_UNIFIED.contains("terminator"));
+
+        // Should use complement regex for flexible matching
+        assert!(GRAMMAR_UNIFIED.contains("#ex'"));
     }
 
     #[test]
-    fn test_grammar_tools_only_structure() {
-        assert!(GRAMMAR_TOOLS_ONLY.contains("start::="));
-        assert!(GRAMMAR_TOOLS_ONLY.contains("<tool_call>"));
-        assert!(GRAMMAR_TOOLS_ONLY.contains("</tool_call>"));
-        assert!(GRAMMAR_TOOLS_ONLY.contains("tool_json"));
-        // Check for JSON field names in the grammar
-        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"name"'"#));
-        assert!(GRAMMAR_TOOLS_ONLY.contains(r#"'"arguments"'"#));
+    fn test_grammar_unified_uses_complement_regex() {
+        // The unified grammar should use #ex for matching text before tags
+        // This allows < characters in text (e.g., "2 < 3")
+        assert!(GRAMMAR_UNIFIED.contains("#ex'</think>'"));
+        assert!(GRAMMAR_UNIFIED.contains("#ex'<tool_call>'"));
     }
 
     #[test]
-    fn test_grammar_thinking_plus_tools_structure() {
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("start::="));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<think>"));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("</think>"));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("<tool_call>"));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("</tool_call>"));
-        assert!(GRAMMAR_THINKING_PLUS_TOOLS.contains("thinking_block"));
+    fn test_build_structural_grammar_unified() {
+        // All parameter combinations should produce the same unified grammar
+        let stop_seqs = vec!["\n\n".to_string()];
+
+        let grammar_tt = build_structural_grammar(true, true, &stop_seqs);
+        let grammar_tf = build_structural_grammar(true, false, &stop_seqs);
+        let grammar_ft = build_structural_grammar(false, true, &stop_seqs);
+        let grammar_ff = build_structural_grammar(false, false, &stop_seqs);
+
+        // All should contain unified grammar elements
+        for grammar in [&grammar_tt, &grammar_tf, &grammar_ft, &grammar_ff] {
+            assert!(grammar.contains("json_object")); // From primitives
+            assert!(grammar.contains("<think>")); // Always in unified
+            assert!(grammar.contains("<tool_call>")); // Always in unified
+            assert!(grammar.contains("terminator::=")); // From stop sequences
+        }
     }
 
     #[test]
-    fn test_build_structural_grammar_thinking_only() {
-        let grammar = build_structural_grammar(true, false);
-        assert!(grammar.contains("json_object")); // From primitives
-        assert!(grammar.contains("<think>")); // From thinking
-        assert!(!grammar.contains("<tool_call>")); // No tools
+    fn test_build_structural_grammar_includes_terminator() {
+        let stop_seqs = vec!["\n\n".to_string(), "</s>".to_string()];
+        let grammar = build_structural_grammar(false, false, &stop_seqs);
+
+        assert!(grammar.contains("terminator::="));
+        assert!(grammar.contains("'\\n\\n'"));
+        assert!(grammar.contains("'</s>'"));
     }
 
     #[test]
-    fn test_build_structural_grammar_tools_only() {
-        let grammar = build_structural_grammar(false, true);
-        assert!(grammar.contains("json_object")); // From primitives
-        assert!(grammar.contains("<tool_call>")); // From tools
-        assert!(!grammar.contains("<think>")); // No thinking
+    fn test_build_terminator_rule_empty() {
+        let rule = build_terminator_rule(&[]);
+        assert_eq!(rule, "terminator::='\\n\\n';\n");
     }
 
     #[test]
-    fn test_build_structural_grammar_both() {
-        let grammar = build_structural_grammar(true, true);
-        assert!(grammar.contains("json_object")); // From primitives
-        assert!(grammar.contains("<think>")); // From combined
-        assert!(grammar.contains("<tool_call>")); // From combined
-    }
-
-    #[test]
-    fn test_build_structural_grammar_neither() {
-        let grammar = build_structural_grammar(false, false);
-        assert!(grammar.contains("json_object")); // From primitives
-        assert!(grammar.contains("start::=")); // Has start rule
-        assert!(!grammar.contains("<think>"));
-        assert!(!grammar.contains("<tool_call>"));
+    fn test_build_terminator_rule_multiple() {
+        let stop_seqs = vec!["\n\n".to_string(), "\n".to_string()];
+        let rule = build_terminator_rule(&stop_seqs);
+        assert!(rule.contains("'\\n\\n'"));
+        assert!(rule.contains("'\\n'"));
+        assert!(rule.contains(" | "));
     }
 
     #[test]
@@ -238,6 +277,8 @@ greeting::='Hello' | 'Hi';"#;
         assert!(wrapped.contains("user_start::=greeting"));
         // User's other rules preserved
         assert!(wrapped.contains("greeting::="));
+        // Should use complement regex in thinking block
+        assert!(wrapped.contains("#ex'</think>'"));
     }
 
     #[test]
@@ -245,9 +286,7 @@ greeting::='Hello' | 'Hi';"#;
         // Basic syntax checks - ensure grammars follow KBNF patterns
         let grammars = [
             GRAMMAR_JSON_PRIMITIVES,
-            GRAMMAR_THINKING_ONLY,
-            GRAMMAR_TOOLS_ONLY,
-            GRAMMAR_THINKING_PLUS_TOOLS,
+            GRAMMAR_UNIFIED,
             GRAMMAR_THINKING_WRAPPER,
         ];
 
