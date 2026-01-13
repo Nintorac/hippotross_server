@@ -186,6 +186,8 @@ async fn generate_with_bnf(
         sampler: Arc::new(RwLock::new(ai00_core::sampler::nucleus::NucleusSampler::default())),
         kind: ai00_core::GenerateKind::None,
         state: Default::default(),
+        request_id: None,
+        trace_id: None,
     };
 
     sender
