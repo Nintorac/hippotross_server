@@ -963,15 +963,18 @@ impl CoreRuntime {
                     }
                 };
 
-                // Debug log for model output (RUST_LOG=ai00_core=debug to enable)
+                // Debug log for model I/O (RUST_LOG=ai00_core=debug to enable)
+                // Combined input and output in single event for easier debugging
                 let raw_output = String::from_utf8_lossy(&context.model_text);
                 tracing::debug!(
-                    event = "model_output",
+                    event = "model_io",
                     request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                     trace_id = %context.request.trace_id.as_deref().unwrap_or("-"),
-                    raw_output = %raw_output,
-                    token_count = context.model_tokens.len(),
-                    "Raw model output"
+                    input_prompt = %context.request.prompt,
+                    input_tokens = context.prompt_tokens.len(),
+                    output_text = %raw_output,
+                    output_tokens = context.model_tokens.len(),
+                    "Model I/O complete"
                 );
 
                 let _ = context.sender.send(Token::Stop(reason, counter));
