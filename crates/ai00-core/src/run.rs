@@ -557,7 +557,12 @@ impl CoreRuntime {
             match self.check_in_state(&state).await {
                 Ok(state) => state,
                 Err(err) => {
-                    tracing::error!("[queue][state][slot: {batch}] error: {err:#?}");
+                    tracing::error!(
+                        event = "slot_state_error",
+                        batch = batch,
+                        error = %err,
+                        "Slot state check-in failed"
+                    );
                     Default::default()
                 }
             }
@@ -671,7 +676,12 @@ impl CoreRuntime {
             let updated = match update(handle).await {
                 Ok(updated) => updated,
                 Err(err) => {
-                    tracing::error!("[update][error][slot: {batch}] {err:#?}");
+                    tracing::error!(
+                        event = "slot_update_failed",
+                        batch = batch,
+                        error = %err,
+                        "Slot update failed"
+                    );
                     let mut slots = self.slots.lock().await;
                     slots[batch] = Default::default();
                     continue;
@@ -878,7 +888,13 @@ impl CoreRuntime {
             let mut word = match self.tokenizer.decode(&[token]) {
                 Ok(word) => word,
                 Err(err) => {
-                    tracing::warn!("[process][error] {err:#?}");
+                    tracing::warn!(
+                        event = "token_decode_failed",
+                        request_id = ?context.request.request_id,
+                        token_id = token,
+                        error = %err,
+                        "Token decode failed"
+                    );
                     stop_token = true;
                     Vec::new()
                 }
@@ -1076,7 +1092,11 @@ async fn enqueue(runtime: CoreRuntime, receiver: Receiver<GenerateContext>, time
                     SlotResult::Failure(context) => temp.push(*context),
                     SlotResult::Success(batch) => tracing::info!("[enqueue][ok][slot: {batch}]"),
                     SlotResult::Fault(batch) => tracing::info!("[enqueue][fault][slot: {batch}]"),
-                    SlotResult::Error(err) => tracing::error!("[enqueue][error] {err:#?}"),
+                    SlotResult::Error(err) => tracing::error!(
+                        event = "enqueue_failed",
+                        error = %err,
+                        "Enqueue failed"
+                    ),
                 }
             }
             std::mem::swap(&mut queue, &mut temp);
