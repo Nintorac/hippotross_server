@@ -590,7 +590,7 @@ impl CoreRuntime {
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
                 tracing::info!(
                     event = "slot_assigned",
-                    request_id = ?context.request.request_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                     slot = batch,
                     assignment_type = "back",
                     cache_hit_tokens = len,
@@ -620,7 +620,7 @@ impl CoreRuntime {
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
                 tracing::info!(
                     event = "slot_assigned",
-                    request_id = ?context.request.request_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                     slot = batch,
                     assignment_type = "empty",
                     cache_hit_tokens = len,
@@ -649,7 +649,7 @@ impl CoreRuntime {
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
                 tracing::info!(
                     event = "slot_assigned",
-                    request_id = ?context.request.request_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                     slot = batch,
                     assignment_type = "continue",
                     cache_hit_tokens = len,
@@ -858,7 +858,7 @@ impl CoreRuntime {
 
                 tracing::debug!(
                     event = "cache_slot_reserved",
-                    request_id = ?context.request.request_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                     slot = batch,
                     prompt_tokens = context.prompt_tokens.len(),
                     "Cache slot reserved for prompt"
@@ -910,7 +910,7 @@ impl CoreRuntime {
 
                 tracing::debug!(
                     event = "cache_prompt_stored",
-                    request_id = ?context.request.request_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                     slot = batch,
                     cached_tokens = context.prefix.len(),
                     "Prompt cached"
@@ -931,7 +931,7 @@ impl CoreRuntime {
                 Err(err) => {
                     tracing::warn!(
                         event = "token_decode_failed",
-                        request_id = ?context.request.request_id,
+                        request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                         token_id = token,
                         error = %err,
                         "Token decode failed"
@@ -967,8 +967,8 @@ impl CoreRuntime {
                 let raw_output = String::from_utf8_lossy(&context.model_text);
                 tracing::debug!(
                     event = "model_output",
-                    request_id = ?context.request.request_id,
-                    trace_id = ?context.request.trace_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
+                    trace_id = %context.request.trace_id.as_deref().unwrap_or("-"),
                     raw_output = %raw_output,
                     token_count = context.model_tokens.len(),
                     "Raw model output"
@@ -1092,7 +1092,7 @@ impl CoreRuntime {
 
                     tracing::debug!(
                         event = "cache_response_stored",
-                        request_id = ?context.request.request_id,
+                        request_id = %context.request.request_id.as_deref().unwrap_or("-"),
                         slot = batch,
                         cached_tokens = context.prefix.len(),
                         "Response state cached"
@@ -1122,8 +1122,8 @@ impl CoreRuntime {
 
                 tracing::info!(
                     event = "inference_batch",
-                    request_id = ?context.request.request_id,
-                    trace_id = ?context.request.trace_id,
+                    request_id = %context.request.request_id.as_deref().unwrap_or("-"),
+                    trace_id = %context.request.trace_id.as_deref().unwrap_or("-"),
                     slot = batch,
                     prompt_tokens = context.prompt_tokens.len(),
                     cache_hit_tokens = cache_hit_tokens,
