@@ -21,6 +21,7 @@ use super::types::{
 use crate::{
     api::{error::ApiErrorResponse, request_info},
     config::{Config, PromptsConfig},
+    logging::RequestContext,
     types::ThreadSender,
     SLEEP,
 };
@@ -92,7 +93,12 @@ fn resolve_bnf_config(
 }
 
 /// Convert MessagesRequest to GenerateRequest.
-fn to_generate_request(req: &MessagesRequest, prompts: &PromptsConfig) -> GenerateRequest {
+fn to_generate_request(
+    req: &MessagesRequest,
+    prompts: &PromptsConfig,
+    request_id: Option<String>,
+    trace_id: Option<String>,
+) -> GenerateRequest {
     let prompt = build_prompt(
         req.system.as_deref(),
         &req.messages,
@@ -139,6 +145,8 @@ fn to_generate_request(req: &MessagesRequest, prompts: &PromptsConfig) -> Genera
         stop,
         sampler,
         bnf_schema,
+        request_id,
+        trace_id,
         ..Default::default()
     }
 }
@@ -271,15 +279,35 @@ async fn respond_one(
     request: MessagesRequest,
     res: &mut Response,
 ) -> Result<(), ApiErrorResponse> {
+    // Get or create request context for logging (must be first to avoid borrow conflicts)
+    let mut ctx = depot
+        .remove::<RequestContext>("request_context")
+        .unwrap_or_else(|_| RequestContext::new(None));
+
     let sender = depot.obtain::<ThreadSender>().unwrap();
     let config = depot.obtain::<Config>().unwrap();
     let prompts = &config.prompts;
+
+    // Populate request context with request metadata
+    let has_tools = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    let has_thinking = request.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
+    ctx.model = request.model.clone();
+    ctx.stream = false;
+    ctx.max_tokens = request.max_tokens;
+    ctx.has_tools = has_tools;
+    ctx.has_thinking = has_thinking;
+    ctx.message_count = request.messages.len();
 
     let info = request_info(sender.clone(), SLEEP).await;
     let model_name = info.reload.model_path.to_string_lossy().into_owned();
 
     let (token_sender, token_receiver) = flume::unbounded();
-    let gen_request = Box::new(to_generate_request(&request, prompts));
+    let gen_request = Box::new(to_generate_request(
+        &request,
+        prompts,
+        Some(ctx.request_id.clone()),
+        ctx.trace_id.clone(),
+    ));
     let _ = sender.send(ThreadRequest::Generate {
         request: gen_request,
         tokenizer: info.tokenizer,
@@ -401,6 +429,14 @@ async fn respond_one(
         (content_blocks, finish_reason.into())
     };
 
+    // Record token counts and finish reason
+    ctx.record_prompt_tokens(token_counter.prompt);
+    ctx.record_output_tokens(token_counter.completion);
+    ctx.set_finish_reason(&format!("{:?}", stop_reason));
+
+    // Emit canonical log line
+    ctx.emit_canonical_log();
+
     let response =
         MessagesResponse::new(model_name, content, token_counter.into()).with_stop_reason(stop_reason);
 
@@ -410,15 +446,35 @@ async fn respond_one(
 
 /// Handle streaming messages request with Claude-style SSE events.
 async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut Response) {
+    // Get or create request context for logging (must be first to avoid borrow conflicts)
+    let mut ctx = depot
+        .remove::<RequestContext>("request_context")
+        .unwrap_or_else(|_| RequestContext::new(None));
+
     let sender = depot.obtain::<ThreadSender>().unwrap();
     let config = depot.obtain::<Config>().unwrap();
     let prompts = &config.prompts;
+
+    // Populate request context with request metadata
+    let has_tools_early = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    let has_thinking_early = request.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
+    ctx.model = request.model.clone();
+    ctx.stream = true;
+    ctx.max_tokens = request.max_tokens;
+    ctx.has_tools = has_tools_early;
+    ctx.has_thinking = has_thinking_early;
+    ctx.message_count = request.messages.len();
 
     let info = request_info(sender.clone(), SLEEP).await;
     let model_name = info.reload.model_path.to_string_lossy().into_owned();
 
     let (token_sender, token_receiver) = flume::unbounded();
-    let gen_request = Box::new(to_generate_request(&request, prompts));
+    let gen_request = Box::new(to_generate_request(
+        &request,
+        prompts,
+        Some(ctx.request_id.clone()),
+        ctx.trace_id.clone(),
+    ));
     let _ = sender.send(ThreadRequest::Generate {
         request: gen_request,
         tokenizer: info.tokenizer.clone(),
@@ -477,6 +533,13 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
             .await;
         }
     }
+
+    // For streaming, we use estimated input tokens (actual counts are tracked per-batch in ai00-core)
+    ctx.record_prompt_tokens(input_tokens);
+    ctx.set_finish_reason("stream_complete");
+
+    // Emit canonical log line
+    ctx.emit_canonical_log();
 }
 
 /// Simple streaming handler without tool parsing.

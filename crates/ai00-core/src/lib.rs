@@ -199,6 +199,10 @@ pub struct GenerateRequest {
     pub kind: GenerateKind,
     /// Initial state.
     pub state: Arc<InputState>,
+    /// Request ID (UUID7, this service's span ID).
+    pub request_id: Option<String>,
+    /// Trace ID (from x-request-id header, for cross-service correlation).
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Derivative, Clone, Serialize, Deserialize, ToSchema)]
