@@ -13,6 +13,7 @@ use tokio::{
 
 pub mod api;
 pub mod config;
+pub mod logging;
 pub mod types;
 
 /// Sleep duration between retry attempts.
