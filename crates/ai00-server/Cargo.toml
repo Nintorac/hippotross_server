@@ -27,7 +27,6 @@ lazy_static = "1.4.0"
 regex = "1.8"
 serde_json = "1"
 sha2 = "0.10.8"
-simple_logger = { version = "5.0.0", features = ["stderr"] }
 tempfile = "3.6"
 toml = "0.9"
 zip = "5.1"
@@ -37,11 +36,12 @@ anyhow.workspace = true
 derivative.workspace = true
 flume.workspace = true
 itertools.workspace = true
-log.workspace = true
 memmap2.workspace = true
 safetensors.workspace = true
 serde.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 uuid.workspace = true
 web-rwkv.workspace = true
 

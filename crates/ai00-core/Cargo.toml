@@ -32,11 +32,11 @@ anyhow.workspace = true
 derivative.workspace = true
 flume.workspace = true
 itertools.workspace = true
-log.workspace = true
 memmap2.workspace = true
 safetensors.workspace = true
 serde.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 web-rwkv.workspace = true
 
 [dependencies.salvo]

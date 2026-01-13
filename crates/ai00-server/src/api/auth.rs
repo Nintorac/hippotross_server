@@ -65,7 +65,7 @@ pub fn exchange(depot: &mut Depot, req: JsonBody<AppKeyRequest>, res: &mut Respo
                 }));
             }
             Err(err) => {
-                log::info!("Unable to encoding jwt_token: {}", err);
+                tracing::info!("Unable to encoding jwt_token: {}", err);
                 res.status_code(StatusCode::BAD_REQUEST)
                     .render(Json(AuthResponse {
                         token: None,
