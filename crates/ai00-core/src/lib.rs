@@ -718,8 +718,8 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
             // Debug log for model input (RUST_LOG=ai00_core=debug to enable)
             tracing::debug!(
                 event = "model_input",
-                request_id = ?context.request.request_id,
-                trace_id = ?context.request.trace_id,
+                request_id = %context.request.request_id.as_deref().unwrap_or("-"),
+                trace_id = %context.request.trace_id.as_deref().unwrap_or("-"),
                 raw_prompt = %context.request.prompt,
                 token_count = context.prompt_tokens.len(),
                 "Raw model input"
