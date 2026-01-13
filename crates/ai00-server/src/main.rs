@@ -324,7 +324,8 @@ async fn main() {
     let ipv4_addr = SocketAddr::new(IpAddr::V4(ipv4_addr), port);
 
     let url = match ip_addr {
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED) | IpAddr::V4(Ipv4Addr::UNSPECIFIED) => "localhost".into(),
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED) => "[::]".into(),
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => "0.0.0.0".into(),
         IpAddr::V6(addr) => addr.to_string(),
         IpAddr::V4(addr) => addr.to_string(),
     };
