@@ -839,6 +839,11 @@ impl CoreRuntime {
 
     /// Read in the prompt of a batch and continuously sample it until it is done.
     async fn process(self, batch: usize, mut context: GenerateContext) -> Result<GenerateContext> {
+        // Track timing phases
+        let process_start = Instant::now();
+        let cache_hit_tokens = context.prefix.len();
+        let mut prefill_end: Option<Instant> = None;
+
         // schedule a future cache slot for the prompt
         {
             let mut caches = self.caches.lock().await;
@@ -885,7 +890,12 @@ impl CoreRuntime {
                     context.prefix = Tokens([prefix.0, suffix.0].concat());
                     context.suffix = Tokens(vec![]);
 
-                    receiver.recv_async().await?
+                    let output = receiver.recv_async().await?;
+                    // Mark end of prefill phase (first inference call completed)
+                    if prefill_end.is_none() {
+                        prefill_end = Some(Instant::now());
+                    }
+                    output
                 }
             };
 
@@ -1096,16 +1106,33 @@ impl CoreRuntime {
             }
 
             if done {
-                let duration_ms = context.instant.map(|i| i.elapsed().as_millis() as u64).unwrap_or(0);
+                // Calculate timing breakdown
+                let total_ms = process_start.elapsed().as_millis() as u64;
+                let prefill_ms = prefill_end
+                    .map(|t| t.duration_since(process_start).as_millis() as u64)
+                    .unwrap_or(0);
+                let decode_ms = total_ms.saturating_sub(prefill_ms);
+
+                // Determine finish reason
+                let finish_reason = if context.model_tokens.len() >= context.request.max_tokens {
+                    "length"
+                } else {
+                    "stop"
+                };
+
                 tracing::info!(
-                    event = "inference_complete",
+                    event = "inference_batch",
                     request_id = ?context.request.request_id,
                     trace_id = ?context.request.trace_id,
                     slot = batch,
                     prompt_tokens = context.prompt_tokens.len(),
+                    cache_hit_tokens = cache_hit_tokens,
                     output_tokens = context.model_tokens.len(),
-                    duration_ms = duration_ms,
-                    "Inference complete"
+                    prefill_ms = prefill_ms,
+                    decode_ms = decode_ms,
+                    total_ms = total_ms,
+                    finish_reason = %finish_reason,
+                    "Inference batch complete"
                 );
                 break;
             }
