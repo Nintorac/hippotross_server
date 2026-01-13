@@ -7,7 +7,7 @@ use salvo::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::types::JwtClaims;
+use crate::{logging, types::JwtClaims};
 
 #[derive(Serialize, Deserialize, Debug, ToParameters, ToSchema)]
 #[salvo(extract(
@@ -65,7 +65,7 @@ pub fn exchange(depot: &mut Depot, req: JsonBody<AppKeyRequest>, res: &mut Respo
                 }));
             }
             Err(err) => {
-                tracing::info!("Unable to encoding jwt_token: {}", err);
+                logging::errors::jwt_encode_failed(&err.to_string());
                 res.status_code(StatusCode::BAD_REQUEST)
                     .render(Json(AuthResponse {
                         token: None,

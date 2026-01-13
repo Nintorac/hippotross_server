@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use web_rwkv::runtime::{loader::Loader, model::ModelInfo};
 
-use crate::check_path_permitted;
+use crate::{check_path_permitted, logging};
 
 const PERMITTED_PATHS: [&str; 4] = [
     "assets/models",
@@ -92,6 +92,7 @@ async fn dir_inner(
     _depot: &mut Depot,
     Json(request): Json<FileInfoRequest>,
 ) -> Result<(StatusCode, Vec<FileInfo>), StatusCode> {
+    let path_str = request.path.to_string_lossy().to_string();
     match std::fs::read_dir(request.path) {
         Ok(path) => {
             let files = path
@@ -127,7 +128,7 @@ async fn dir_inner(
             Ok((StatusCode::OK, files))
         }
         Err(err) => {
-            tracing::error!("failed to read directory: {}", err);
+            logging::errors::directory_read_failed(&path_str, &err.to_string());
             Err(StatusCode::NOT_FOUND)
         }
     }
@@ -144,7 +145,7 @@ pub async fn dir(depot: &mut Depot, req: &mut Request, res: &mut Response) {
         }
     };
     if let Err(err) = check_path(&request.path) {
-        tracing::error!("check path failed: {}", err);
+        logging::errors::path_validation_failed(&request.path.to_string_lossy(), &err.to_string());
         res.status_code(StatusCode::FORBIDDEN);
         res.render("ERROR");
         return;
@@ -184,12 +185,15 @@ pub async fn models(depot: &mut Depot, res: &mut Response) {
 
 #[handler]
 pub async fn unzip(_depot: &mut Depot, request: UnzipRequest) -> StatusCode {
+    let source_path = request.path.to_string_lossy().to_string();
+    let dest_path = request.output.to_string_lossy().to_string();
+
     if let Err(err) = check_path(&request.path) {
-        tracing::error!("check path failed: {}", err);
+        logging::errors::path_validation_failed(&source_path, &err.to_string());
         return StatusCode::FORBIDDEN;
     }
     if let Err(err) = check_path_permitted(&request.output, &UNZIP_PATHS) {
-        tracing::error!("check path failed: {}", err);
+        logging::errors::path_validation_failed(&dest_path, &err.to_string());
         return StatusCode::FORBIDDEN;
     }
 
@@ -210,7 +214,7 @@ pub async fn unzip(_depot: &mut Depot, request: UnzipRequest) -> StatusCode {
     match unzip_inner() {
         Ok(_) => StatusCode::OK,
         Err(err) => {
-            tracing::error!("failed to unzip: {}", err);
+            logging::errors::unzip_failed(&source_path, &dest_path, &err.to_string());
             StatusCode::NOT_FOUND
         }
     }
@@ -219,10 +223,13 @@ pub async fn unzip(_depot: &mut Depot, request: UnzipRequest) -> StatusCode {
 /// `/api/files/config/load`.
 #[handler]
 pub async fn load_config(_depot: &mut Depot, request: LoadRequest, response: &mut Response) {
+    let config_path = request.path.to_string_lossy().to_string();
+
     if let Err(err) = check_path(&request.path) {
-        tracing::error!("check path failed: {}", err);
+        logging::errors::path_validation_failed(&config_path, &err.to_string());
         response.status_code(StatusCode::FORBIDDEN);
         response.render("FORBIDDEN");
+        return;
     }
     match crate::load_config(request.path).await {
         Ok(config) => {
@@ -230,8 +237,7 @@ pub async fn load_config(_depot: &mut Depot, request: LoadRequest, response: &mu
             response.render(Json(config));
         }
         Err(err) => {
-            tracing::error!("failed to load config: {}", err);
-            // Err(StatusCode::NOT_FOUND)
+            logging::errors::model_load_failed(&config_path, &err.to_string());
             response.status_code(StatusCode::NOT_FOUND);
             response.render("NOT_FOUND");
         }
@@ -241,8 +247,10 @@ pub async fn load_config(_depot: &mut Depot, request: LoadRequest, response: &mu
 /// `/api/files/config/save`.
 #[handler]
 pub async fn save_config(_depot: &mut Depot, request: SaveRequest) -> StatusCode {
+    let config_path = request.path.to_string_lossy().to_string();
+
     if let Err(err) = check_path(&request.path) {
-        tracing::error!("check path failed: {}", err);
+        logging::errors::path_validation_failed(&config_path, &err.to_string());
         return StatusCode::FORBIDDEN;
     }
 
@@ -257,15 +265,17 @@ pub async fn save_config(_depot: &mut Depot, request: SaveRequest) -> StatusCode
         Some(ext) if ext == "toml" => match write() {
             Ok(_) => StatusCode::OK,
             Err(err) => {
-                tracing::error!("failed to save config: {err:#?}");
+                tracing::error!(
+                    event = "config_save_failed",
+                    path = %config_path,
+                    error = %err,
+                    "Config save failed"
+                );
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         },
         _ => {
-            tracing::error!(
-                "failed to save config: file path {} is not toml",
-                request.path.to_string_lossy()
-            );
+            logging::errors::path_validation_failed(&config_path, "file path is not toml");
             StatusCode::FORBIDDEN
         }
     }
