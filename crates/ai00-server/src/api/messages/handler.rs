@@ -21,7 +21,7 @@ use super::types::{
 use crate::{
     api::{error::ApiErrorResponse, request_info},
     config::{Config, PromptsConfig},
-    logging::RequestContext,
+    logging::{RequestContext, StreamLogContext},
     types::ThreadSender,
     SLEEP,
 };
@@ -465,6 +465,9 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
     ctx.has_thinking = has_thinking_early;
     ctx.message_count = request.messages.len();
 
+    // Convert to StreamLogContext for passing to stream handlers
+    let log_ctx = ctx.to_stream_log_context();
+
     let info = request_info(sender.clone(), SLEEP).await;
     let model_name = info.reload.model_path.to_string_lossy().into_owned();
 
@@ -472,8 +475,8 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
     let gen_request = Box::new(to_generate_request(
         &request,
         prompts,
-        Some(ctx.request_id.clone()),
-        ctx.trace_id.clone(),
+        Some(log_ctx.request_id.clone()),
+        log_ctx.trace_id.clone(),
     ));
     let _ = sender.send(ThreadRequest::Generate {
         request: gen_request,
@@ -484,7 +487,7 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
     // Generate message ID
     let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
 
-    // Estimate input tokens (rough approximation)
+    // Estimate input tokens (rough approximation - actual counts come from TokenCounter)
     let input_tokens = request
         .messages
         .iter()
@@ -504,22 +507,44 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
         .map(|t| t.is_enabled())
         .unwrap_or(false);
 
+    // Stream handlers will emit the canonical log when Token::Stop is received
     match (has_thinking, has_tools) {
         (true, false) => {
             // Thinking-aware streaming
-            respond_stream_with_thinking(res, token_receiver, message_id, model_name, input_tokens)
-                .await;
+            respond_stream_with_thinking(
+                res,
+                token_receiver,
+                message_id,
+                model_name,
+                input_tokens,
+                log_ctx,
+            )
+            .await;
         }
         (false, true) => {
             // Tool-aware streaming with ToolParser
-            respond_stream_with_tools(res, token_receiver, message_id, model_name, input_tokens)
-                .await;
+            respond_stream_with_tools(
+                res,
+                token_receiver,
+                message_id,
+                model_name,
+                input_tokens,
+                log_ctx,
+            )
+            .await;
         }
         (true, true) => {
             // Both thinking and tools: use tool-aware streaming
             // (thinking extraction in tool mode is handled during finalization)
-            respond_stream_with_tools(res, token_receiver, message_id, model_name, input_tokens)
-                .await;
+            respond_stream_with_tools(
+                res,
+                token_receiver,
+                message_id,
+                model_name,
+                input_tokens,
+                log_ctx,
+            )
+            .await;
         }
         (false, false) => {
             // Streaming with optional thinking detection (model decides whether to think)
@@ -529,17 +554,12 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
                 message_id,
                 model_name,
                 input_tokens,
+                log_ctx,
             )
             .await;
         }
     }
-
-    // For streaming, we use estimated input tokens (actual counts are tracked per-batch in ai00-core)
-    ctx.record_prompt_tokens(input_tokens);
-    ctx.set_finish_reason("stream_complete");
-
-    // Emit canonical log line
-    ctx.emit_canonical_log();
+    // Note: Canonical log is emitted by stream handlers when they receive Token::Stop
 }
 
 /// Simple streaming handler without tool parsing.
@@ -613,6 +633,7 @@ async fn respond_stream_with_optional_thinking(
     message_id: String,
     model_name: String,
     input_tokens: usize,
+    log_ctx: StreamLogContext,
 ) {
     use std::cell::RefCell;
 
@@ -623,6 +644,7 @@ async fn respond_stream_with_optional_thinking(
         thinking_block_started: bool,
         text_block_started: bool,
         message_started: bool,
+        log_ctx: StreamLogContext,
     }
 
     let state = RefCell::new(StreamState {
@@ -631,6 +653,7 @@ async fn respond_stream_with_optional_thinking(
         thinking_block_started: false,
         text_block_started: false,
         message_started: false,
+        log_ctx,
     });
 
     let stream = token_receiver.into_stream().flat_map(move |token| {
@@ -705,7 +728,11 @@ async fn respond_stream_with_optional_thinking(
                     }
                 }
             }
-            Token::Stop(reason, _counter) => {
+            Token::Stop(reason, counter) => {
+                // Emit canonical log with actual metrics
+                let finish_reason: StopReason = reason.into();
+                state.log_ctx.emit_with_counter(&counter, &format!("{:?}", finish_reason));
+
                 // Finalize parser
                 let final_result = state.parser.finalize();
 
@@ -746,8 +773,7 @@ async fn respond_stream_with_optional_thinking(
                 }
 
                 // Emit message delta
-                let stop_reason: StopReason = reason.into();
-                events.push(Ok(emit_message_delta(stop_reason, state.output_tokens)));
+                events.push(Ok(emit_message_delta(finish_reason, state.output_tokens)));
             }
             Token::Done => {
                 events.push(Ok(emit_message_stop()));
@@ -771,6 +797,7 @@ async fn respond_stream_with_thinking(
     message_id: String,
     model_name: String,
     input_tokens: usize,
+    log_ctx: StreamLogContext,
 ) {
     use std::cell::RefCell;
 
@@ -783,6 +810,7 @@ async fn respond_stream_with_thinking(
         thinking_block_started: bool,
         text_block_started: bool,
         message_started: bool,
+        log_ctx: StreamLogContext,
     }
 
     let state = RefCell::new(StreamState {
@@ -793,6 +821,7 @@ async fn respond_stream_with_thinking(
         thinking_block_started: false,
         text_block_started: false,
         message_started: false,
+        log_ctx,
     });
 
     let stream = token_receiver.into_stream().flat_map(move |token| {
@@ -853,7 +882,11 @@ async fn respond_stream_with_thinking(
                     }
                 }
             }
-            Token::Stop(reason, _counter) => {
+            Token::Stop(reason, counter) => {
+                // Emit canonical log with actual metrics
+                let finish_reason: StopReason = reason.into();
+                state.log_ctx.emit_with_counter(&counter, &format!("{:?}", finish_reason));
+
                 // Finalize parser
                 let final_result = state.parser.finalize();
 
@@ -898,8 +931,7 @@ async fn respond_stream_with_thinking(
                 }
 
                 // Emit message delta
-                let stop_reason: StopReason = reason.into();
-                events.push(Ok(emit_message_delta(stop_reason, state.output_tokens)));
+                events.push(Ok(emit_message_delta(finish_reason, state.output_tokens)));
             }
             Token::Done => {
                 events.push(Ok(emit_message_stop()));
@@ -923,6 +955,7 @@ async fn respond_stream_with_tools(
     message_id: String,
     model_name: String,
     input_tokens: usize,
+    log_ctx: StreamLogContext,
 ) {
     use std::cell::RefCell;
 
@@ -933,6 +966,7 @@ async fn respond_stream_with_tools(
         content_block_index: usize,
         text_block_started: bool,
         message_started: bool,
+        log_ctx: StreamLogContext,
     }
 
     let state = RefCell::new(StreamState {
@@ -941,6 +975,7 @@ async fn respond_stream_with_tools(
         content_block_index: 0,
         text_block_started: false,
         message_started: false,
+        log_ctx,
     });
 
     let stream = token_receiver.into_stream().flat_map(move |token| {
@@ -1007,7 +1042,17 @@ async fn respond_stream_with_tools(
                     state.content_block_index += 1;
                 }
             }
-            Token::Stop(reason, _counter) => {
+            Token::Stop(reason, counter) => {
+                // Determine stop reason (may be ToolUse if tools were parsed)
+                let stop_reason = if state.parser.has_tool_use() {
+                    StopReason::ToolUse
+                } else {
+                    reason.into()
+                };
+
+                // Emit canonical log with actual metrics
+                state.log_ctx.emit_with_counter(&counter, &format!("{:?}", stop_reason));
+
                 // Finalize parser
                 let final_result = state.parser.finalize();
 
@@ -1053,13 +1098,6 @@ async fn respond_stream_with_tools(
                 if state.text_block_started {
                     events.push(Ok(emit_content_block_stop(state.content_block_index)));
                 }
-
-                // Determine stop reason
-                let stop_reason = if state.parser.has_tool_use() {
-                    StopReason::ToolUse
-                } else {
-                    reason.into()
-                };
 
                 events.push(Ok(emit_message_delta(stop_reason, state.output_tokens)));
             }

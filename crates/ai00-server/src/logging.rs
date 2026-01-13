@@ -237,6 +237,54 @@ impl RequestContext {
             "Request completed"
         );
     }
+
+    /// Convert to a StreamLogContext for passing to stream handlers.
+    pub fn to_stream_log_context(self) -> StreamLogContext {
+        StreamLogContext {
+            request_id: self.request_id,
+            trace_id: self.trace_id,
+            model: self.model,
+            max_tokens: self.max_tokens,
+            has_tools: self.has_tools,
+            has_thinking: self.has_thinking,
+            message_count: self.message_count,
+        }
+    }
+}
+
+/// Context passed to stream handlers for logging at stream completion.
+#[derive(Debug, Clone)]
+pub struct StreamLogContext {
+    pub request_id: String,
+    pub trace_id: Option<String>,
+    pub model: String,
+    pub max_tokens: usize,
+    pub has_tools: bool,
+    pub has_thinking: bool,
+    pub message_count: usize,
+}
+
+impl StreamLogContext {
+    /// Emit canonical log with actual metrics from TokenCounter.
+    pub fn emit_with_counter(&self, counter: &ai00_core::TokenCounter, finish_reason: &str) {
+        tracing::info!(
+            event = "request_complete",
+            canonical = true,
+            request_id = %self.request_id,
+            trace_id = ?self.trace_id,
+            model = %self.model,
+            stream = true,
+            max_tokens = self.max_tokens,
+            has_tools = self.has_tools,
+            has_thinking = self.has_thinking,
+            message_count = self.message_count,
+            prompt_tokens = counter.prompt,
+            output_tokens = counter.completion,
+            duration_ms = counter.duration.as_millis() as u64,
+            finish_reason = %finish_reason,
+            "Request completed"
+        );
+    }
 }
 
 /// Inference batch events
