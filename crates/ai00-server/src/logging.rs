@@ -334,27 +334,25 @@ pub mod inference {
 
 /// Debug-level payload logging (enabled via RUST_LOG=ai00_core=debug)
 pub mod debug {
-    /// Log raw model input before inference.
-    pub fn model_input(request_id: &str, trace_id: Option<&str>, raw_prompt: &str, token_count: usize) {
+    /// Log combined model input and output after inference completes.
+    /// This provides a single event with both the prompt and generated text for easier debugging.
+    pub fn model_io(
+        request_id: &str,
+        trace_id: Option<&str>,
+        input_prompt: &str,
+        input_tokens: usize,
+        output_text: &str,
+        output_tokens: usize,
+    ) {
         tracing::debug!(
-            event = "model_input",
+            event = "model_io",
             request_id = %request_id,
             trace_id = ?trace_id,
-            raw_prompt = %raw_prompt,
-            token_count = token_count,
-            "Raw model input"
-        );
-    }
-
-    /// Log raw model output after inference.
-    pub fn model_output(request_id: &str, trace_id: Option<&str>, raw_output: &str, token_count: usize) {
-        tracing::debug!(
-            event = "model_output",
-            request_id = %request_id,
-            trace_id = ?trace_id,
-            raw_output = %raw_output,
-            token_count = token_count,
-            "Raw model output"
+            input_prompt = %input_prompt,
+            input_tokens = input_tokens,
+            output_text = %output_text,
+            output_tokens = output_tokens,
+            "Model I/O complete"
         );
     }
 }
