@@ -465,7 +465,12 @@ async fn load_runtime(
                 tracing::info!("{:#?}", state);
                 states.push(state);
             }
-            Err(err) => tracing::warn!("initial state not loaded: {}", err),
+            Err(err) => tracing::warn!(
+                event = "state_load_failed",
+                state_name = %name,
+                error = %err,
+                "State load failed"
+            ),
         }
     }
 
@@ -812,7 +817,11 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 let _ = match handle.await? {
                     Ok(_) => sender.send(true),
                     Err(err) => {
-                        tracing::error!("[reload] error: {err:#?}");
+                        tracing::error!(
+                            event = "model_load_failed",
+                            error = %err,
+                            "Model reload failed"
+                        );
                         sender.send(false)
                     }
                 };
@@ -851,7 +860,11 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 let _ = match handle.await? {
                     Ok(_) => sender.send(true),
                     Err(err) => {
-                        tracing::error!("[save] error: {err:#?}");
+                        tracing::error!(
+                            event = "model_save_failed",
+                            error = %err,
+                            "Model save failed"
+                        );
                         sender.send(false)
                     }
                 };
