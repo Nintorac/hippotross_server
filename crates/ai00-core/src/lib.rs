@@ -458,10 +458,10 @@ async fn load_runtime(
                     data,
                     default,
                 };
-                log::info!("{:#?}", state);
+                tracing::info!("{:#?}", state);
                 states.push(state);
             }
-            Err(err) => log::warn!("initial state not loaded: {}", err),
+            Err(err) => tracing::warn!("initial state not loaded: {}", err),
         }
     }
 
@@ -714,21 +714,21 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                         _ => bail!("failed to read model info"),
                     }
                 };
-                log::info!("{:#?}", request);
-                log::info!("{:#?}", info);
-                log::info!("model type: {:?}", load);
+                tracing::info!("{:#?}", request);
+                tracing::info!("{:#?}", info);
+                tracing::info!("model type: {:?}", load);
 
-                log::info!("[reload] acquiring env write lock...");
+                tracing::info!("[reload] acquiring env write lock...");
                 let mut env = env.write().await;
-                log::info!("[reload] env write lock acquired, clearing env...");
+                tracing::info!("[reload] env write lock acquired, clearing env...");
                 let _ = std::mem::take(&mut *env);
 
-                log::info!(
+                tracing::info!(
                     "[reload] loading tokenizer from {:?}...",
                     &request.tokenizer_path
                 );
                 let tokenizer = Arc::new(load_tokenizer(&request.tokenizer_path).await?);
-                log::info!(
+                tracing::info!(
                     "[reload] tokenizer loaded, dispatching backend {:?}...",
                     request.backend
                 );
@@ -737,7 +737,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 let (states, runtime, state, model, softmax_backend) = match request.backend {
                     Backend::WebGpu => {
                         let context = create_context(request.adapter, &info).await?;
-                        log::info!("{:#?}", context.adapter.get_info());
+                        tracing::info!("{:#?}", context.adapter.get_info());
 
                         let (states, runtime, state, model) =
                             load_runtime(&context, &info, &request, load).await?;
@@ -746,7 +746,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                     }
                     #[cfg(feature = "hip")]
                     Backend::Hip => {
-                        log::info!("loading model with HIP backend");
+                        tracing::info!("loading model with HIP backend");
                         let (states, runtime, state) = load_runtime_hip(&info, &request).await?;
                         let softmax_backend = crate::run::SoftmaxBackend::Hip;
                         // HIP backend does not support model serialization (Save)
@@ -779,7 +779,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                     sender
                 };
 
-                log::info!("model loaded");
+                tracing::info!("model loaded");
 
                 let _ = std::mem::replace(
                     &mut *env,
@@ -797,7 +797,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 let _ = match handle.await? {
                     Ok(_) => sender.send(true),
                     Err(err) => {
-                        log::error!("[reload] error: {err:#?}");
+                        tracing::error!("[reload] error: {err:#?}");
                         sender.send(false)
                     }
                 };
@@ -817,7 +817,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
         ThreadRequest::Unload => {
             let mut env = env.write().await;
             let _ = std::mem::take(&mut *env);
-            log::info!("model unloaded");
+            tracing::info!("model unloaded");
         }
         ThreadRequest::Save { request, sender } => {
             let env = env.read().await;
@@ -825,7 +825,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 model: Some(model), ..
             } = &*env
             {
-                log::info!("serializing model into {:?}", &request.path);
+                tracing::info!("serializing model into {:?}", &request.path);
                 let model = model.clone();
                 let handle = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::create(request.path)?;
@@ -836,12 +836,12 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 let _ = match handle.await? {
                     Ok(_) => sender.send(true),
                     Err(err) => {
-                        log::error!("[save] error: {err:#?}");
+                        tracing::error!("[save] error: {err:#?}");
                         sender.send(false)
                     }
                 };
             } else {
-                log::warn!("[save] model does not support serialization");
+                tracing::warn!("[save] model does not support serialization");
                 let _ = sender.send(false);
             }
         }

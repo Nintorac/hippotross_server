@@ -557,7 +557,7 @@ impl CoreRuntime {
             match self.check_in_state(&state).await {
                 Ok(state) => state,
                 Err(err) => {
-                    log::error!("[queue][state][slot: {batch}] error: {err:#?}");
+                    tracing::error!("[queue][state][slot: {batch}] error: {err:#?}");
                     Default::default()
                 }
             }
@@ -577,14 +577,14 @@ impl CoreRuntime {
             ),
             // back a non-relative and non-empty slot and use it for our new context
             Some(SlotChoice::Back(batch)) => {
-                log::info!("[queue][back][slot: {batch}]");
+                tracing::info!("[queue][back][slot: {batch}]");
                 let state = check_in_state(context.request.state.clone(), batch).await;
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
-                log::info!("[cache][checkout[[slot: {batch}][len: {len}]");
+                tracing::info!("[cache][checkout[[slot: {batch}][len: {len}]");
 
                 let context = GenerateContext {
                     prefix: Tokens(tokens[..len].to_vec()),
@@ -600,14 +600,14 @@ impl CoreRuntime {
             }
             // directly occupy an empty slot so no need backing
             Some(SlotChoice::Empty(batch)) => {
-                log::info!("[queue][empty][slot: {batch}]");
+                tracing::info!("[queue][empty][slot: {batch}]");
                 let state = check_in_state(context.request.state.clone(), batch).await;
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
-                log::info!("[cache][checkout][slot: {batch}][len: {len}]");
+                tracing::info!("[cache][checkout][slot: {batch}][len: {len}]");
 
                 let context = GenerateContext {
                     prefix: Tokens(tokens[..len].to_vec()),
@@ -622,14 +622,14 @@ impl CoreRuntime {
                 SlotResult::Success(batch)
             }
             Some(SlotChoice::Continue(batch, ..)) => {
-                log::info!("[queue][continue][slot: {batch}]");
+                tracing::info!("[queue][continue][slot: {batch}]");
                 let state = check_in_state(context.request.state.clone(), batch).await;
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
-                log::info!("[cache][checkout[[slot: {batch}][len: {len}]");
+                tracing::info!("[cache][checkout[[slot: {batch}][len: {len}]");
 
                 let context = GenerateContext {
                     prefix: Tokens(tokens[..len].to_vec()),
@@ -671,7 +671,7 @@ impl CoreRuntime {
             let updated = match update(handle).await {
                 Ok(updated) => updated,
                 Err(err) => {
-                    log::error!("[update][error][slot: {batch}] {err:#?}");
+                    tracing::error!("[update][error][slot: {batch}] {err:#?}");
                     let mut slots = self.slots.lock().await;
                     slots[batch] = Default::default();
                     continue;
@@ -821,7 +821,7 @@ impl CoreRuntime {
                 cache.insert(Tokens(context.prompt_tokens.clone()), sender);
 
                 let len = context.prompt_tokens.len();
-                log::info!("[cache][future][slot: {batch}][len: {len}]");
+                tracing::info!("[cache][future][slot: {batch}][len: {len}]");
             }
         }
 
@@ -863,7 +863,7 @@ impl CoreRuntime {
                 context.prompt_cached = CachedPrompt::Done;
 
                 let len = context.prefix.len();
-                log::info!("[cache][insert][slot: {batch}][len: {len}]");
+                tracing::info!("[cache][insert][slot: {batch}][len: {len}]");
             }
 
             let (token, output) = {
@@ -878,7 +878,7 @@ impl CoreRuntime {
             let mut word = match self.tokenizer.decode(&[token]) {
                 Ok(word) => word,
                 Err(err) => {
-                    log::warn!("[process][error] {err:#?}");
+                    tracing::warn!("[process][error] {err:#?}");
                     stop_token = true;
                     Vec::new()
                 }
@@ -1023,7 +1023,7 @@ impl CoreRuntime {
                     cache.insert(context.prefix.clone(), item);
 
                     let len = context.prefix.len();
-                    log::info!("[cache][insert][slot: {batch}][len: {len}]");
+                    tracing::info!("[cache][insert][slot: {batch}][len: {len}]");
                 }
             } else if context.model_tokens.len() >= context.request.max_tokens {
                 stop(FinishReason::Length);
@@ -1033,7 +1033,7 @@ impl CoreRuntime {
             }
 
             if done {
-                log::info!("[process][done][slot: {batch}]");
+                tracing::info!("[process][done][slot: {batch}]");
                 break;
             }
         }
@@ -1063,9 +1063,9 @@ async fn enqueue(runtime: CoreRuntime, receiver: Receiver<GenerateContext>, time
             for context in queue.drain(..) {
                 match runtime.queue(context).await {
                     SlotResult::Failure(context) => temp.push(*context),
-                    SlotResult::Success(batch) => log::info!("[enqueue][ok][slot: {batch}]"),
-                    SlotResult::Fault(batch) => log::info!("[enqueue][fault][slot: {batch}]"),
-                    SlotResult::Error(err) => log::error!("[enqueue][error] {err:#?}"),
+                    SlotResult::Success(batch) => tracing::info!("[enqueue][ok][slot: {batch}]"),
+                    SlotResult::Fault(batch) => tracing::info!("[enqueue][fault][slot: {batch}]"),
+                    SlotResult::Error(err) => tracing::error!("[enqueue][error] {err:#?}"),
                 }
             }
             std::mem::swap(&mut queue, &mut temp);
@@ -1179,7 +1179,7 @@ async fn infer(
         }
     }
 
-    log::info!("[infer] exit");
+    tracing::info!("[infer] exit");
     Ok(())
 }
 
@@ -1221,7 +1221,7 @@ async fn softmax(
         batches.clear();
     }
 
-    log::info!("[softmax] exit");
+    tracing::info!("[softmax] exit");
     Ok(())
 }
 

@@ -67,7 +67,7 @@ fn load_embed(embed: config::EmbedOption) -> Result<TextEmbed> {
 
     let api = Api::new()?;
     let info = TextEmbedding::get_model_info(&embed.model)?.clone();
-    log::info!("loading embed model: {}", embed.model);
+    tracing::info!("loading embed model: {}", embed.model);
 
     let options = InitOptions::new(embed.model).with_show_download_progress(true);
     let model = TextEmbedding::try_new(options)?;
@@ -108,20 +108,31 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => log::info!("received Ctrl+C, shutting down..."),
-        _ = terminate => log::info!("received SIGTERM, shutting down..."),
+        _ = ctrl_c => tracing::info!("received Ctrl+C, shutting down..."),
+        _ = terminate => tracing::info!("received SIGTERM, shutting down..."),
     }
 }
 
 #[tokio::main]
 async fn main() {
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Warn)
-        .with_module_level("ai00_server", log::LevelFilter::Info)
-        .with_module_level("ai00_core", log::LevelFilter::Info)
-        .with_module_level("web_rwkv", log::LevelFilter::Info)
-        .init()
-        .expect("start logger");
+    use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("warn,ai00_server=info,ai00_core=info,web_rwkv=info"));
+
+    let pretty_mode = std::env::var("LOG_PRETTY").is_ok();
+
+    if pretty_mode {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().pretty())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().json())
+            .init();
+    }
 
     let args = Args::parse();
 
@@ -129,7 +140,7 @@ async fn main() {
     let version = cmd.get_version().unwrap_or("0.0.1");
     let bin_name = cmd.get_bin_name().unwrap_or("ai00_server");
 
-    log::info!("{}\tversion: {}", bin_name, version);
+    tracing::info!("{}\tversion: {}", bin_name, version);
 
     let (sender, receiver) = flume::unbounded::<ThreadRequest>();
     tokio::spawn(ai00_core::serve(receiver));
@@ -139,7 +150,7 @@ async fn main() {
             .config
             .clone()
             .unwrap_or("assets/configs/Config.toml".into());
-        log::info!("reading config {}...", path.to_string_lossy());
+        tracing::info!("reading config {}...", path.to_string_lossy());
         load_config(path).await.expect("failed to startup")
     };
 
@@ -150,7 +161,7 @@ async fn main() {
         .and_then(|embed| match load_embed(embed) {
             Ok(embed) => Some(std::sync::Arc::new(embed)),
             Err(err) => {
-                log::error!("failed to load embed model: {}", err);
+                tracing::error!("failed to load embed model: {}", err);
                 None
             }
         });
@@ -173,7 +184,7 @@ async fn main() {
             };
             let _ = sender.send(request);
         }
-        Err(err) => log::error!("failed to load model: {}", err),
+        Err(err) => tracing::error!("failed to load model: {}", err),
     }
 
     let serve_path = match config.web.clone() {
@@ -206,13 +217,13 @@ async fn main() {
                         let x = x.path();
                         let name = x.file_stem().expect("this cannot happen").to_string_lossy();
                         match load_plugin(&x, &path, &name).await {
-                            Ok(_) => log::info!("loaded plugin {}", name),
-                            Err(err) => log::error!("failed to load plugin {}, {}", name, err),
+                            Ok(_) => tracing::info!("loaded plugin {}", name),
+                            Err(err) => tracing::error!("failed to load plugin {}, {}", name, err),
                         }
                     }
                 }
                 Err(err) => {
-                    log::error!("failed to read plugin directory: {}", err);
+                    tracing::error!("failed to read plugin directory: {}", err);
                 }
             };
 
@@ -321,7 +332,7 @@ async fn main() {
         true => format!("https://{url}:{port}"),
         false => format!("http://{url}:{port}"),
     };
-    log::info!("open frontend at {url}");
+    tracing::info!("open frontend at {url}");
 
     // Helper macro to run server with graceful shutdown
     macro_rules! serve_graceful {
@@ -337,7 +348,7 @@ async fn main() {
 
             // serve() completes when stop_graceful() is called
             server.serve($service).await;
-            log::info!("server shutdown complete");
+            tracing::info!("server shutdown complete");
         }};
     }
 
@@ -358,11 +369,11 @@ async fn main() {
             let acceptor = ipv6_listener.bind().await;
             #[cfg(target_os = "windows")]
             let acceptor = listener.join(ipv6_listener).bind().await;
-            log::info!("server started at {ipv6_addr} with acme and tls");
+            tracing::info!("server started at {ipv6_addr} with acme and tls");
             serve_graceful!(acceptor, service);
         } else {
             let acceptor = listener.bind().await;
-            log::info!("server started at {ipv4_addr} with acme and tls.");
+            tracing::info!("server started at {ipv4_addr} with acme and tls.");
             serve_graceful!(acceptor, service);
         };
     } else if tls {
@@ -389,20 +400,20 @@ async fn main() {
                 .join(listener)
                 .bind()
                 .await;
-            log::info!("server started at {ipv6_addr} with tls");
+            tracing::info!("server started at {ipv6_addr} with tls");
             serve_graceful!(acceptor, service);
         } else {
             let acceptor = QuinnListener::new(config.clone(), ipv4_addr)
                 .join(listener)
                 .bind()
                 .await;
-            log::info!("server started at {ipv4_addr} with tls");
+            tracing::info!("server started at {ipv4_addr} with tls");
             serve_graceful!(acceptor, service);
         };
     } else if let Some(ipv6_addr) = ipv6_addr {
         let ipv6_addr = SocketAddr::new(IpAddr::V6(ipv6_addr), port);
         let ipv6_listener = TcpListener::new(ipv6_addr);
-        log::info!("server started at {ipv6_addr} without tls");
+        tracing::info!("server started at {ipv6_addr} without tls");
         // on Linux, when the IpV6 addr is unspecified while the IpV4 addr being unspecified, it will cause exception "address in used"
         #[cfg(not(target_os = "windows"))]
         if ipv6_addr.ip().is_unspecified() {
@@ -418,11 +429,11 @@ async fn main() {
             serve_graceful!(acceptor, service);
         }
     } else {
-        log::info!("server started at {ipv4_addr} without tls");
+        tracing::info!("server started at {ipv4_addr} without tls");
         let acceptor = TcpListener::new(ipv4_addr).bind().await;
         serve_graceful!(acceptor, service);
     };
 
-    log::info!("waiting for background tasks to complete...");
+    tracing::info!("waiting for background tasks to complete...");
     tokio::time::sleep(Duration::from_millis(500)).await;
 }
