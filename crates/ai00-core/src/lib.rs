@@ -700,6 +700,17 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
             sender,
         } => {
             let context = GenerateContext::new(*request, sender, &tokenizer).await?;
+
+            // Debug log for model input (RUST_LOG=ai00_core=debug to enable)
+            tracing::debug!(
+                event = "model_input",
+                request_id = ?context.request.request_id,
+                trace_id = ?context.request.trace_id,
+                raw_prompt = %context.request.prompt,
+                token_count = context.prompt_tokens.len(),
+                "Raw model input"
+            );
+
             let env = env.read().await;
             if let Environment::Loaded { sender, .. } = &*env {
                 let _ = sender.send(context);
