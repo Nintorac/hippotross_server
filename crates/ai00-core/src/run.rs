@@ -906,6 +906,17 @@ impl CoreRuntime {
                     }
                 };
 
+                // Debug log for model output (RUST_LOG=ai00_core=debug to enable)
+                let raw_output = String::from_utf8_lossy(&context.model_text);
+                tracing::debug!(
+                    event = "model_output",
+                    request_id = ?context.request.request_id,
+                    trace_id = ?context.request.trace_id,
+                    raw_output = %raw_output,
+                    token_count = context.model_tokens.len(),
+                    "Raw model output"
+                );
+
                 let _ = context.sender.send(Token::Stop(reason, counter));
                 let _ = context.sender.send(Token::Done);
                 done = true;
