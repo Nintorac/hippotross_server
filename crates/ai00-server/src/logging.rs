@@ -4,7 +4,15 @@
 //! wide format logging pattern. Each category of events captures complete context
 //! in a single structured log entry.
 
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+/// Get current timestamp in milliseconds since Unix epoch.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Server lifecycle events
 pub mod lifecycle {
@@ -218,10 +226,12 @@ impl RequestContext {
     /// Emit the canonical log line for this request.
     pub fn emit_canonical_log(&self) {
         let duration_ms = self.duration_ms();
+        let timestamp_ms = crate::logging::now_ms();
 
         tracing::info!(
             event = "request_complete",
             canonical = true,
+            timestamp_ms = timestamp_ms,
             request_id = %self.request_id,
             trace_id = ?self.trace_id,
             model = %self.model,
@@ -267,9 +277,12 @@ pub struct StreamLogContext {
 impl StreamLogContext {
     /// Emit canonical log with actual metrics from TokenCounter.
     pub fn emit_with_counter(&self, counter: &ai00_core::TokenCounter, finish_reason: &str) {
+        let timestamp_ms = crate::logging::now_ms();
+
         tracing::info!(
             event = "request_complete",
             canonical = true,
+            timestamp_ms = timestamp_ms,
             request_id = %self.request_id,
             trace_id = ?self.trace_id,
             model = %self.model,
