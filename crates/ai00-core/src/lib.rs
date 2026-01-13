@@ -451,6 +451,7 @@ async fn load_runtime(
                 None => continue,
             },
         };
+        let path_str = path.display().to_string();
         let file = File::open(path).await?;
         let data = unsafe { Mmap::map(&file) }?;
         let model = SafeTensors::deserialize(&data)?;
@@ -462,11 +463,19 @@ async fn load_runtime(
                     data,
                     default,
                 };
-                tracing::info!("{:#?}", state);
+                tracing::info!(
+                    event = "state_loaded",
+                    path = %path_str,
+                    name = %state.name,
+                    state_id = ?state.id,
+                    is_default = state.default,
+                    "State loaded"
+                );
                 states.push(state);
             }
             Err(err) => tracing::warn!(
                 event = "state_load_failed",
+                path = %path_str,
                 state_name = %name,
                 error = %err,
                 "State load failed"
@@ -734,30 +743,65 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                         _ => bail!("failed to read model info"),
                     }
                 };
-                tracing::info!("{:#?}", request);
-                tracing::info!("{:#?}", info);
-                tracing::info!("model type: {:?}", load);
+                tracing::info!(
+                    event = "model_load",
+                    path = %request.model_path.display(),
+                    tokenizer_path = %request.tokenizer_path.display(),
+                    batch_size = request.max_batch,
+                    chunk_size = request.token_chunk_size,
+                    quant_type = ?request.quant_type,
+                    precision = ?request.precision,
+                    "Loading model"
+                );
+                tracing::info!(
+                    event = "model_metadata",
+                    version = ?info.version,
+                    layers = info.num_layer,
+                    embed_size = info.num_emb,
+                    hidden_size = info.num_hidden,
+                    vocab_size = info.num_vocab,
+                    heads = info.num_head,
+                    "Model metadata"
+                );
+                tracing::info!(
+                    event = "model_format",
+                    format = ?load,
+                    "Model format detected"
+                );
 
-                tracing::info!("[reload] acquiring env write lock...");
+                tracing::info!(event = "env_lock", "Acquiring env write lock...");
                 let mut env = env.write().await;
-                tracing::info!("[reload] env write lock acquired, clearing env...");
+                tracing::info!(event = "env_lock_acquired", "Env write lock acquired, clearing env...");
                 let _ = std::mem::take(&mut *env);
 
                 tracing::info!(
-                    "[reload] loading tokenizer from {:?}...",
-                    &request.tokenizer_path
+                    event = "tokenizer_load",
+                    path = %request.tokenizer_path.display(),
+                    "Loading tokenizer"
                 );
                 let tokenizer = Arc::new(load_tokenizer(&request.tokenizer_path).await?);
                 tracing::info!(
-                    "[reload] tokenizer loaded, dispatching backend {:?}...",
-                    request.backend
+                    event = "backend_dispatch",
+                    backend = ?request.backend,
+                    "Dispatching to backend"
                 );
 
                 // Dispatch based on backend selection
                 let (states, runtime, state, model, softmax_backend) = match request.backend {
                     Backend::WebGpu => {
                         let context = create_context(request.adapter, &info).await?;
-                        tracing::info!("{:#?}", context.adapter.get_info());
+                        let adapter_info = context.adapter.get_info();
+                        tracing::info!(
+                            event = "gpu_context",
+                            adapter_name = %adapter_info.name,
+                            vendor = adapter_info.vendor,
+                            device = adapter_info.device,
+                            device_type = ?adapter_info.device_type,
+                            driver = %adapter_info.driver,
+                            driver_info = %adapter_info.driver_info,
+                            backend = ?adapter_info.backend,
+                            "GPU context created"
+                        );
 
                         let (states, runtime, state, model) =
                             load_runtime(&context, &info, &request, load).await?;
@@ -799,7 +843,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                     sender
                 };
 
-                tracing::info!("model loaded");
+                tracing::info!(event = "model_loaded", "Model loaded successfully");
 
                 let _ = std::mem::replace(
                     &mut *env,
@@ -829,10 +873,10 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 // Fire-and-forget initial load: log errors from the background task
                 tokio::spawn(async move {
                     match handle.await {
-                        Ok(Ok(())) => log::info!("[reload] background load completed successfully"),
-                        Ok(Err(err)) => log::error!("[reload] background load FAILED: {err:#?}"),
+                        Ok(Ok(())) => tracing::info!("[reload] background load completed successfully"),
+                        Ok(Err(err)) => tracing::error!("[reload] background load FAILED: {err:#?}"),
                         Err(join_err) => {
-                            log::error!("[reload] background task panicked: {join_err:#?}")
+                            tracing::error!("[reload] background task panicked: {join_err:#?}")
                         }
                     }
                 });
@@ -841,7 +885,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
         ThreadRequest::Unload => {
             let mut env = env.write().await;
             let _ = std::mem::take(&mut *env);
-            tracing::info!("model unloaded");
+            tracing::info!(event = "model_unload", "Model unloaded");
         }
         ThreadRequest::Save { request, sender } => {
             let env = env.read().await;
@@ -849,7 +893,12 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 model: Some(model), ..
             } = &*env
             {
-                tracing::info!("serializing model into {:?}", &request.path);
+                let output_path = request.path.display().to_string();
+                tracing::info!(
+                    event = "model_save",
+                    output_path = %output_path,
+                    "Serializing model"
+                );
                 let model = model.clone();
                 let handle = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::create(request.path)?;
