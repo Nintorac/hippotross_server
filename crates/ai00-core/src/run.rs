@@ -582,14 +582,21 @@ impl CoreRuntime {
             ),
             // back a non-relative and non-empty slot and use it for our new context
             Some(SlotChoice::Back(batch)) => {
-                tracing::info!("[queue][back][slot: {batch}]");
                 let state = check_in_state(context.request.state.clone(), batch).await;
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
-                tracing::info!("[cache][checkout[[slot: {batch}][len: {len}]");
+                tracing::info!(
+                    event = "slot_assigned",
+                    request_id = ?context.request.request_id,
+                    slot = batch,
+                    assignment_type = "back",
+                    cache_hit_tokens = len,
+                    prompt_tokens = tokens.len(),
+                    "Slot assigned (backing existing)"
+                );
 
                 let context = GenerateContext {
                     prefix: Tokens(tokens[..len].to_vec()),
@@ -605,14 +612,21 @@ impl CoreRuntime {
             }
             // directly occupy an empty slot so no need backing
             Some(SlotChoice::Empty(batch)) => {
-                tracing::info!("[queue][empty][slot: {batch}]");
                 let state = check_in_state(context.request.state.clone(), batch).await;
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
-                tracing::info!("[cache][checkout][slot: {batch}][len: {len}]");
+                tracing::info!(
+                    event = "slot_assigned",
+                    request_id = ?context.request.request_id,
+                    slot = batch,
+                    assignment_type = "empty",
+                    cache_hit_tokens = len,
+                    prompt_tokens = tokens.len(),
+                    "Slot assigned (empty slot)"
+                );
 
                 let context = GenerateContext {
                     prefix: Tokens(tokens[..len].to_vec()),
@@ -627,14 +641,21 @@ impl CoreRuntime {
                 SlotResult::Success(batch)
             }
             Some(SlotChoice::Continue(batch, ..)) => {
-                tracing::info!("[queue][continue][slot: {batch}]");
                 let state = check_in_state(context.request.state.clone(), batch).await;
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
-                tracing::info!("[cache][checkout[[slot: {batch}][len: {len}]");
+                tracing::info!(
+                    event = "slot_assigned",
+                    request_id = ?context.request.request_id,
+                    slot = batch,
+                    assignment_type = "continue",
+                    cache_hit_tokens = len,
+                    prompt_tokens = tokens.len(),
+                    "Slot assigned (continuing existing)"
+                );
 
                 let context = GenerateContext {
                     prefix: Tokens(tokens[..len].to_vec()),
@@ -830,8 +851,13 @@ impl CoreRuntime {
                 context.prompt_cached = CachedPrompt::Future(sender.clone());
                 cache.insert(Tokens(context.prompt_tokens.clone()), sender);
 
-                let len = context.prompt_tokens.len();
-                tracing::info!("[cache][future][slot: {batch}][len: {len}]");
+                tracing::debug!(
+                    event = "cache_slot_reserved",
+                    request_id = ?context.request.request_id,
+                    slot = batch,
+                    prompt_tokens = context.prompt_tokens.len(),
+                    "Cache slot reserved for prompt"
+                );
             }
         }
 
@@ -872,8 +898,13 @@ impl CoreRuntime {
                 sender.send_replace(Some(CachedItem::new(backed, output)));
                 context.prompt_cached = CachedPrompt::Done;
 
-                let len = context.prefix.len();
-                tracing::info!("[cache][insert][slot: {batch}][len: {len}]");
+                tracing::debug!(
+                    event = "cache_prompt_stored",
+                    request_id = ?context.request.request_id,
+                    slot = batch,
+                    cached_tokens = context.prefix.len(),
+                    "Prompt cached"
+                );
             }
 
             let (token, output) = {
@@ -1049,8 +1080,13 @@ impl CoreRuntime {
                     let (item, _) = tokio::sync::watch::channel(Some(item));
                     cache.insert(context.prefix.clone(), item);
 
-                    let len = context.prefix.len();
-                    tracing::info!("[cache][insert][slot: {batch}][len: {len}]");
+                    tracing::debug!(
+                        event = "cache_response_stored",
+                        request_id = ?context.request.request_id,
+                        slot = batch,
+                        cached_tokens = context.prefix.len(),
+                        "Response state cached"
+                    );
                 }
             } else if context.model_tokens.len() >= context.request.max_tokens {
                 stop(FinishReason::Length);
@@ -1060,7 +1096,17 @@ impl CoreRuntime {
             }
 
             if done {
-                tracing::info!("[process][done][slot: {batch}]");
+                let duration_ms = context.instant.map(|i| i.elapsed().as_millis() as u64).unwrap_or(0);
+                tracing::info!(
+                    event = "inference_complete",
+                    request_id = ?context.request.request_id,
+                    trace_id = ?context.request.trace_id,
+                    slot = batch,
+                    prompt_tokens = context.prompt_tokens.len(),
+                    output_tokens = context.model_tokens.len(),
+                    duration_ms = duration_ms,
+                    "Inference complete"
+                );
                 break;
             }
         }
@@ -1090,8 +1136,16 @@ async fn enqueue(runtime: CoreRuntime, receiver: Receiver<GenerateContext>, time
             for context in queue.drain(..) {
                 match runtime.queue(context).await {
                     SlotResult::Failure(context) => temp.push(*context),
-                    SlotResult::Success(batch) => tracing::info!("[enqueue][ok][slot: {batch}]"),
-                    SlotResult::Fault(batch) => tracing::info!("[enqueue][fault][slot: {batch}]"),
+                    SlotResult::Success(batch) => tracing::debug!(
+                        event = "enqueue_success",
+                        slot = batch,
+                        "Request enqueued successfully"
+                    ),
+                    SlotResult::Fault(batch) => tracing::debug!(
+                        event = "enqueue_fault",
+                        slot = batch,
+                        "Request enqueued with fault (backing required)"
+                    ),
                     SlotResult::Error(err) => tracing::error!(
                         event = "enqueue_failed",
                         error = %err,
