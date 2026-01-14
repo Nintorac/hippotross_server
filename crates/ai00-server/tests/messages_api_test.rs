@@ -1329,11 +1329,11 @@ fn test_integration_structural_unified_grammar() {
     assert!(result.is_some());
 
     let grammar = result.unwrap();
-    // Unified grammar always contains both thinking and tool tags
+    // Unified grammar always contains both thinking and function call tags
     assert!(grammar.contains("<think>"));
     assert!(grammar.contains("</think>"));
-    assert!(grammar.contains("<tool_call>"));
-    assert!(grammar.contains("</tool_call>"));
+    assert!(grammar.contains("<ai00:function_calls>"));
+    assert!(grammar.contains("</ai00:function_calls>"));
     // Should contain JSON primitives
     assert!(grammar.contains("json_object"));
     // Should use complement regex
@@ -1472,7 +1472,7 @@ fn test_integration_grammar_constants_structure() {
     // Unified grammar constant
     assert!(GRAMMAR_UNIFIED.contains("::="));
     assert!(GRAMMAR_UNIFIED.contains("<think>"));
-    assert!(GRAMMAR_UNIFIED.contains("<tool_call>"));
+    assert!(GRAMMAR_UNIFIED.contains("<ai00:function_calls>"));  // ai00 XML format
     assert!(GRAMMAR_UNIFIED.contains("#ex'")); // Complement regex
 }
 
@@ -1491,7 +1491,7 @@ fn test_integration_build_structural_grammar() {
 
         // Unified grammar always has both (both are optional in the grammar)
         assert!(grammar.contains("<think>"), "Missing <think> for ({}, {})", thinking, tools);
-        assert!(grammar.contains("<tool_call>"), "Missing <tool_call> for ({}, {})", thinking, tools);
+        assert!(grammar.contains("<ai00:function_calls>"), "Missing <ai00:function_calls> for ({}, {})", thinking, tools);
 
         // Should have terminator
         assert!(grammar.contains("terminator::="), "Missing terminator for ({}, {})", thinking, tools);
@@ -1548,7 +1548,7 @@ fn test_integration_schema_aware_no_tools_fallback() {
     let grammar = result.unwrap();
     // Unified grammar always has both
     assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<tool_call>"));
+    assert!(grammar.contains("<ai00:function_calls>"));  // ai00 XML format
 
     // No tools, no thinking - still returns unified grammar
     let result = generate_bnf_schema(None, false, BnfValidationLevel::SchemaAware, &stop_seqs);

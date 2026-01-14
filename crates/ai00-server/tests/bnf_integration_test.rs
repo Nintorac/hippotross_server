@@ -746,8 +746,8 @@ fn test_build_structural_grammar_unified_for_all_combinations() {
         // Unified grammar always includes thinking (optional)
         assert!(grammar.contains("<think>"), "Missing <think> for ({}, {})", thinking, tools);
 
-        // Unified grammar always includes tool calls (optional)
-        assert!(grammar.contains("<tool_call>"), "Missing <tool_call> for ({}, {})", thinking, tools);
+        // Unified grammar always includes function calls (ai00 XML format)
+        assert!(grammar.contains("<ai00:function_calls>"), "Missing <ai00:function_calls> for ({}, {})", thinking, tools);
 
         // Unified grammar always has terminator
         assert!(grammar.contains("terminator::="), "Missing terminator for ({}, {})", thinking, tools);
@@ -841,7 +841,7 @@ fn test_generate_schema_aware_grammar_integration() {
     let grammar = generate_schema_aware_grammar(&tools);
     assert!(grammar.contains("start::="));
     assert!(grammar.contains("<think>"));  // Always present in unified grammar
-    assert!(grammar.contains("<tool_call>"));
+    assert!(grammar.contains("<ai00:function_calls>"));  // ai00 XML format
     assert!(grammar.contains("echo_call"));  // Tool-specific rule
     assert!(grammar.contains("echo_input"));  // Tool-specific input rule
     // Uses complement regex
