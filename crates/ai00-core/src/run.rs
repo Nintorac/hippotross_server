@@ -153,6 +153,10 @@ pub struct GenerateContext {
     pub formatters: Vec<Arc<RwLock<dyn Formatter + Send + Sync>>>,
     /// For measuring time used.
     pub instant: Option<Instant>,
+    /// When this context was created (for queue wait time calculation).
+    pub enqueue_time: Instant,
+    /// Time spent on cache checkout + GPU state load in microseconds (set during slot assignment).
+    pub cache_fetch_us: Option<u64>,
     /// Generate request provided by the caller.
     pub request: GenerateRequest,
     /// To send back generated tokens.
@@ -197,6 +201,8 @@ impl GenerateContext {
             model_tokens: Vec::new(),
             formatters: Vec::new(),
             instant: None,
+            enqueue_time: Instant::now(),
+            cache_fetch_us: None,
             request,
             sender,
         })
@@ -583,8 +589,11 @@ impl CoreRuntime {
             // back a non-relative and non-empty slot and use it for our new context
             Some(SlotChoice::Back(batch)) => {
                 let state = check_in_state(context.request.state.clone(), batch).await;
+
+                let fetch_start = Instant::now();
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
+                let cache_fetch_us = fetch_start.elapsed().as_micros() as u64;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
@@ -603,6 +612,7 @@ impl CoreRuntime {
                     suffix: Tokens(tokens[len..].to_vec()),
                     output: checkout.output,
                     formatters,
+                    cache_fetch_us: Some(cache_fetch_us),
                     ..context
                 };
                 let handle = tokio::spawn(self.clone().process(batch, context));
@@ -613,8 +623,11 @@ impl CoreRuntime {
             // directly occupy an empty slot so no need backing
             Some(SlotChoice::Empty(batch)) => {
                 let state = check_in_state(context.request.state.clone(), batch).await;
+
+                let fetch_start = Instant::now();
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
+                let cache_fetch_us = fetch_start.elapsed().as_micros() as u64;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
@@ -633,6 +646,7 @@ impl CoreRuntime {
                     suffix: Tokens(tokens[len..].to_vec()),
                     output: checkout.output,
                     formatters,
+                    cache_fetch_us: Some(cache_fetch_us),
                     ..context
                 };
                 let handle = tokio::spawn(self.clone().process(batch, context));
@@ -642,8 +656,11 @@ impl CoreRuntime {
             }
             Some(SlotChoice::Continue(batch, ..)) => {
                 let state = check_in_state(context.request.state.clone(), batch).await;
+
+                let fetch_start = Instant::now();
                 let checkout = self.checkout(state, &tokens).await;
                 self.load(batch, checkout.state).await;
+                let cache_fetch_us = fetch_start.elapsed().as_micros() as u64;
 
                 let len = checkout.prefix.len();
                 assert!(len == 0 || (len > 0 && checkout.output.is_some()));
@@ -662,6 +679,7 @@ impl CoreRuntime {
                     suffix: Tokens(tokens[len..].to_vec()),
                     output: checkout.output,
                     formatters,
+                    cache_fetch_us: Some(cache_fetch_us),
                     ..context
                 };
                 let handle = tokio::spawn(self.clone().process(batch, context));
@@ -870,7 +888,13 @@ impl CoreRuntime {
 
         loop {
             let output = match (context.suffix.len(), context.output.clone()) {
-                (0, Some(output)) => output,
+                (0, Some(output)) => {
+                    // Full cache hit - prefill is complete (no inference needed)
+                    if prefill_end.is_none() {
+                        prefill_end = Some(Instant::now());
+                    }
+                    output
+                }
                 _ => {
                     let (sender, receiver) = flume::bounded(1);
                     let _ = self
@@ -1111,10 +1135,18 @@ impl CoreRuntime {
             if done {
                 // Calculate timing breakdown
                 let total_ms = process_start.elapsed().as_millis() as u64;
+                let cache_fetch_us = context.cache_fetch_us.unwrap_or(0);
                 let prefill_ms = prefill_end
                     .map(|t| t.duration_since(process_start).as_millis() as u64)
                     .unwrap_or(0);
                 let decode_ms = total_ms.saturating_sub(prefill_ms);
+
+                // Queue wait = time from enqueue to now, minus cache_fetch and process time
+                let elapsed_since_enqueue = context.enqueue_time.elapsed().as_millis() as u64;
+                let cache_fetch_ms = cache_fetch_us / 1000; // convert to ms for calculation
+                let queue_wait_ms = elapsed_since_enqueue
+                    .saturating_sub(cache_fetch_ms)
+                    .saturating_sub(total_ms);
 
                 // Determine finish reason
                 let finish_reason = if context.model_tokens.len() >= context.request.max_tokens {
@@ -1131,6 +1163,8 @@ impl CoreRuntime {
                     prompt_tokens = context.prompt_tokens.len(),
                     cache_hit_tokens = cache_hit_tokens,
                     output_tokens = context.model_tokens.len(),
+                    queue_wait_ms = queue_wait_ms,
+                    cache_fetch_us = cache_fetch_us,
                     prefill_ms = prefill_ms,
                     decode_ms = decode_ms,
                     total_ms = total_ms,

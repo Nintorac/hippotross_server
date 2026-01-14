@@ -82,7 +82,26 @@ Per-batch inference events for detailed performance analysis:
 
 | Event | Level | When | Fields |
 |-------|-------|------|--------|
-| `inference_batch` | INFO | Batch done | request_id, trace_id, batch, prompt_token_count, cache_hit_tokens, output_token_count, prefill_ms, decode_ms, total_ms, finish_reason |
+| `inference_batch` | INFO | Batch done | request_id, trace_id, batch, prompt_token_count, cache_hit_tokens, output_token_count, queue_wait_ms, cache_fetch_us, prefill_ms, decode_ms, total_ms, finish_reason |
+
+#### Timing Breakdown
+
+The `inference_batch` event includes granular timing metrics:
+
+| Field | Description |
+|-------|-------------|
+| `queue_wait_ms` | Time waiting for an available inference slot (retry loop) |
+| `cache_fetch_us` | Time for cache lookup + GPU state load in **microseconds** (`checkout()` + `load()`) |
+| `prefill_ms` | Time processing prompt tokens (0 on full cache hit) |
+| `decode_ms` | Time for token generation loop |
+| `total_ms` | Total time in `process()` (prefill + decode) |
+
+```
+┌──────────────┐    ┌───────────┐    ┌─────────────────┐    ┌──────────────┐
+│ recv request │───▶│queue_wait │───▶│  cache_fetch    │───▶│   process()  │
+│              │    │   _ms     │    │     _us         │    │prefill+decode│
+└──────────────┘    └───────────┘    └─────────────────┘    └──────────────┘
+```
 
 ### Error Events
 
@@ -272,6 +291,65 @@ Specific error types:
 ```bash
 jq 'select(.event == "model_load_failed")' logs.jsonl
 ```
+
+## Manual Testing
+
+### Test 1: Baseline Request
+
+Verify basic timing metrics:
+
+```bash
+curl -s http://localhost:65530/api/oai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "rwkv", "messages": [{"role": "user", "content": "Say hello"}], "max_tokens": 10}'
+docker logs ai00-server --tail 3 | grep inference_batch
+```
+
+Expected: `cache_hit_tokens=0`, `prefill_ms>0`, `cache_fetch_us` in single digits.
+
+### Test 2: Cache Hit
+
+Verify prefill drops to 0 on cache hit:
+
+```bash
+# Use a long prompt (>128 tokens) for reliable caching
+PROMPT="You are an expert assistant. Here is background context about AI history dating back to ancient times... [long prompt]. What year was Dartmouth?"
+
+# Request 1 - cache miss
+curl -s localhost:65530/api/oai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{\"model\": \"rwkv\", \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}], \"max_tokens\": 20}"
+
+sleep 1
+
+# Request 2 - cache hit (same prompt)
+curl -s localhost:65530/api/oai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{\"model\": \"rwkv\", \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}], \"max_tokens\": 20}"
+
+docker logs ai00-server --tail 4 | grep inference_batch
+```
+
+Expected:
+- Request 1: `cache_hit_tokens=0`, `prefill_ms=~700-800`
+- Request 2: `cache_hit_tokens=211`, `prefill_ms=0`
+
+### Test 3: Queue Pressure
+
+Verify queue_wait_ms increases under load (more requests than slots):
+
+```bash
+# Send 12 parallel requests with 6 slots available
+for i in {1..12}; do
+  curl -s localhost:65530/api/oai/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d "{\"model\": \"rwkv\", \"messages\": [{\"role\": \"user\", \"content\": \"Count to $i\"}], \"max_tokens\": 30}" &
+done
+wait
+docker logs ai00-server --tail 12 | grep inference_batch
+```
+
+Expected: First 6 requests show `queue_wait_ms=0-1`, second 6 show `queue_wait_ms>1000` (waiting for slots).
 
 ## Implementation Details
 
