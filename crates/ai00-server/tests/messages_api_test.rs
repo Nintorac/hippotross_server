@@ -406,27 +406,27 @@ fn test_generate_tool_system_prompt_defaults() {
 }
 
 /// Test PromptsConfig default values.
-/// See docs/rwkv_goose_chat_format.md for format details.
+/// See docs/ai00_chat_format.md for format details.
 #[test]
 fn test_prompts_config_defaults() {
     let config = PromptsConfig::default();
 
-    // Check role defaults (RWKV7-G1 format)
-    assert_eq!(config.role_user, "User");
-    assert_eq!(config.role_assistant, "Assistant");
-    assert_eq!(config.role_system, "System");
+    // Check role defaults (ai00 v1 format - lowercase for XML tags)
+    assert_eq!(config.role_user, "user");
+    assert_eq!(config.role_assistant, "assistant");
+    assert_eq!(config.role_system, "system");
 
-    // Check assistant prefix defaults
-    assert_eq!(config.assistant_prefix, "Assistant:");
-    assert_eq!(config.assistant_prefix_thinking, "Assistant: <think");
+    // Check assistant prefix defaults (ai00 XML format)
+    assert_eq!(config.assistant_prefix, "<ai00:assistant>\n");
+    assert_eq!(config.assistant_prefix_thinking, "<ai00:assistant>\n<think>\n");
 
     // Check thinking suffix defaults
     assert_eq!(config.thinking_suffix_short, " think a bit");
     assert_eq!(config.thinking_suffix_standard, " think");
     assert_eq!(config.thinking_suffix_extended, " think a lot");
 
-    // Check default stop sequences
-    assert_eq!(config.default_stop_sequences, vec!["\n\nUser:"]);
+    // Check default stop sequences (ai00 format)
+    assert_eq!(config.default_stop_sequences, vec!["</ai00:assistant>"]);
 
     // Check tool header and footer contain expected content
     assert!(config.tool_header.contains("# Tools"));

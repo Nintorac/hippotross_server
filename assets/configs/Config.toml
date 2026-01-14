@@ -58,25 +58,30 @@ path = "assets/www/index.zip" # Path to the WebUI.
 # name = { MultilingualE5Small = {} }
 
 # [prompts] # Uncomment to customize prompts. Defaults shown below.
-# See docs/rwkv_goose_chat_format.md for RWKV7-G1 format details.
+# See docs/ai00_chat_format.md for format details.
 #
-# Tool system prompt configuration (Hermes/Qwen style)
-# tool_header = "\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n"
-# tool_footer = "</tools>\n\nIMPORTANT: To call a function, use EXACTLY this XML format:\n<tool_call>\n{\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n\nNEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field."
+# ai00 v1 chat format uses XML-namespaced turn markers:
+#   <ai00:system>system prompt</ai00:system>
+#   <ai00:user>user message</ai00:user>
+#   <ai00:assistant>assistant response</ai00:assistant>
+#
+# Tool system prompt configuration (injected into system block)
+# tool_header = "\n\n# Tools\n\nYou may call one or more functions...\n<tools>\n"
+# tool_footer = "</tools>\n..."
 #
 # Thinking mode suffixes (appended to user message based on budget_tokens)
 # thinking_suffix_short = " think a bit"       # tier 1: 1024-4095 tokens
 # thinking_suffix_standard = " think"          # tier 2: 4096-16383 tokens
 # thinking_suffix_extended = " think a lot"    # tier 3+: 16384+ tokens
 #
-# Role names for prompt formatting (RWKV7-G1 format)
-# role_user = "User"
-# role_assistant = "Assistant"
-# role_system = "System"
+# Role names for prompt formatting (used in <ai00:role> tags)
+# role_user = "user"
+# role_assistant = "assistant"
+# role_system = "system"
 #
 # Assistant generation prefixes
-# assistant_prefix = "Assistant:"
-# assistant_prefix_thinking = "Assistant: <think"  # Note: Don't close the <think bracket
+# assistant_prefix = "<ai00:assistant>\n"
+# assistant_prefix_thinking = "<ai00:assistant>\n<think>\n"
 #
 # Default stop sequences (when not provided in request)
-# default_stop_sequences = ["\n\nUser:"]
+# default_stop_sequences = ["</ai00:assistant>"]

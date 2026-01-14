@@ -6,52 +6,38 @@
 use super::types::{generate_tool_system_prompt, MessageParam, MessageRole, ThinkingConfig, Tool};
 use crate::config::PromptsConfig;
 
-/// Collapse multiple consecutive newlines into a single newline.
+/// Build RWKV prompt from messages using ai00 chat format.
 ///
-/// RWKV uses `\n\n` as a "chat round separator" in pretrain data, so we must
-/// avoid having `\n\n` within message content to prevent premature turn endings.
-///
-/// See: https://huggingface.co/BlinkDL/rwkv7-g1
-pub fn normalize_newlines(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut prev_was_newline = false;
-
-    for c in text.chars() {
-        if c == '\n' {
-            if !prev_was_newline {
-                result.push('\n');
-            }
-            prev_was_newline = true;
-        } else {
-            result.push(c);
-            prev_was_newline = false;
-        }
-    }
-    result
-}
-
-/// Build RWKV prompt from messages.
-///
-/// Format for RWKV7-G1 (https://huggingface.co/BlinkDL/rwkv7-g1):
+/// Format (ai00 v1):
 /// ```text
-/// System: SYSTEM_PROMPT
+/// <ai00:system>
+/// SYSTEM_PROMPT
+/// </ai00:system>
 ///
-/// User: USER_MESSAGE
+/// <ai00:user>
+/// USER_MESSAGE
+/// </ai00:user>
 ///
-/// Assistant: ASSISTANT_MESSAGE
+/// <ai00:assistant>
+/// ASSISTANT_MESSAGE
+/// </ai00:assistant>
 ///
-/// User: USER_MESSAGE
+/// <ai00:user>
+/// USER_MESSAGE
+/// </ai00:user>
 ///
-/// Assistant:
+/// <ai00:assistant>
 /// ```
 ///
-/// For thinking mode (RWKV 20250922+ models):
+/// For thinking mode:
 /// ```text
-/// User: USER_PROMPT think
+/// <ai00:user>
+/// USER_MESSAGE think
+/// </ai00:user>
 ///
-/// Assistant: <think
+/// <ai00:assistant>
+/// <think>
 /// ```
-/// With variants "think a bit" (shorter) and "think a lot" (longer).
 pub fn build_prompt(
     system: Option<&str>,
     messages: &[MessageParam],
@@ -61,11 +47,11 @@ pub fn build_prompt(
 ) -> String {
     let mut prompt = String::new();
 
-    // Add system prompt first (from top-level param, not message role)
-    // Normalize newlines to prevent \n\n from being interpreted as turn separator
+    // Add system prompt with XML turn markers
+    // Newlines are fully preserved within turns (no filtering needed)
     if let Some(sys) = system {
-        let normalized_sys = normalize_newlines(sys);
-        prompt.push_str(&format!("{}: {}", prompts.role_system, normalized_sys));
+        prompt.push_str(&format!("<ai00:{}>\n", prompts.role_system));
+        prompt.push_str(sys);
 
         // Inject tool definitions into system prompt if provided
         if let Some(tools) = tools {
@@ -78,29 +64,28 @@ pub fn build_prompt(
             }
         }
 
-        prompt.push_str("\n\n");
+        prompt.push_str(&format!("\n</ai00:{}>\n\n", prompts.role_system));
     } else if let Some(tools) = tools {
         // If no system prompt but tools provided, create one for tools
         if !tools.is_empty() {
-            prompt.push_str(&format!("{}:", prompts.role_system));
+            prompt.push_str(&format!("<ai00:{}>\n", prompts.role_system));
             prompt.push_str(&generate_tool_system_prompt(
                 tools,
                 Some(&prompts.tool_header),
                 Some(&prompts.tool_footer),
             ));
-            prompt.push_str("\n\n");
+            prompt.push_str(&format!("\n</ai00:{}>\n\n", prompts.role_system));
         }
     }
 
-    // Format conversation messages
-    // Normalize newlines in content to prevent \n\n from being interpreted as turn separator
+    // Format conversation messages with XML turn markers
     let msg_count = messages.len();
     for (i, msg) in messages.iter().enumerate() {
         let role = match msg.role {
             MessageRole::User => &prompts.role_user,
             MessageRole::Assistant => &prompts.role_assistant,
         };
-        let content = normalize_newlines(&msg.content.to_text());
+        let content = msg.content.to_text();
 
         // For the last user message when thinking is enabled, append think suffix
         let is_last_user = i == msg_count - 1 && msg.role == MessageRole::User;
@@ -110,10 +95,13 @@ pub fn build_prompt(
             ""
         };
 
-        prompt.push_str(&format!("{}: {}{}\n\n", role, content, think_suffix));
+        prompt.push_str(&format!(
+            "<ai00:{}>\n{}{}\n</ai00:{}>\n\n",
+            role, content, think_suffix, role
+        ));
     }
 
-    // Add assistant prefix for generation
+    // Add assistant prefix for generation (opens the assistant turn)
     if thinking.map(|t| t.is_enabled()).unwrap_or(false) {
         // Thinking mode: use configurable thinking prefix
         prompt.push_str(&prompts.assistant_prefix_thinking);
@@ -149,15 +137,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_normalize_newlines() {
-        assert_eq!(normalize_newlines("a\n\nb"), "a\nb");
-        assert_eq!(normalize_newlines("a\n\n\nb"), "a\nb");
-        assert_eq!(normalize_newlines("a\nb"), "a\nb");
-        assert_eq!(normalize_newlines("abc"), "abc");
+    fn test_build_prompt_simple() {
+        use super::super::types::{MessageContent, MessageParam, MessageRole};
+
+        let prompts = PromptsConfig::default();
+        let messages = vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Hello".to_string()),
+        }];
+
+        let prompt = build_prompt(Some("You are helpful."), &messages, None, None, &prompts);
+
+        // Verify XML turn format
+        assert!(prompt.contains("<ai00:system>"));
+        assert!(prompt.contains("You are helpful."));
+        assert!(prompt.contains("</ai00:system>"));
+        assert!(prompt.contains("<ai00:user>"));
+        assert!(prompt.contains("Hello"));
+        assert!(prompt.contains("</ai00:user>"));
+        assert!(prompt.contains("<ai00:assistant>"));
     }
 
     #[test]
-    fn test_build_prompt_simple() {
+    fn test_build_prompt_preserves_newlines() {
+        use super::super::types::{MessageContent, MessageParam, MessageRole};
+
+        let prompts = PromptsConfig::default();
+        let messages = vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text("Line 1\n\nLine 2\n\n\nLine 3".to_string()),
+        }];
+
+        let prompt = build_prompt(None, &messages, None, None, &prompts);
+
+        // Verify newlines are preserved (no filtering)
+        assert!(prompt.contains("Line 1\n\nLine 2\n\n\nLine 3"));
+    }
+
+    #[test]
+    fn test_build_prompt_multi_turn() {
         use super::super::types::{MessageContent, MessageParam, MessageRole};
 
         let prompts = PromptsConfig::default();
@@ -166,12 +184,26 @@ mod tests {
                 role: MessageRole::User,
                 content: MessageContent::Text("Hello".to_string()),
             },
+            MessageParam {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text("Hi there!".to_string()),
+            },
+            MessageParam {
+                role: MessageRole::User,
+                content: MessageContent::Text("How are you?".to_string()),
+            },
         ];
 
-        let prompt = build_prompt(Some("You are helpful."), &messages, None, None, &prompts);
+        let prompt = build_prompt(None, &messages, None, None, &prompts);
 
-        assert!(prompt.contains("System: You are helpful."));
-        assert!(prompt.contains("User: Hello"));
-        assert!(prompt.ends_with("Assistant:"));
+        // Verify turn order is preserved
+        let user1_pos = prompt.find("<ai00:user>\nHello").unwrap();
+        let asst_pos = prompt.find("<ai00:assistant>\nHi there!").unwrap();
+        let user2_pos = prompt.find("<ai00:user>\nHow are you?").unwrap();
+        let final_asst_pos = prompt.rfind("<ai00:assistant>").unwrap();
+
+        assert!(user1_pos < asst_pos);
+        assert!(asst_pos < user2_pos);
+        assert!(user2_pos < final_asst_pos);
     }
 }
