@@ -1,0 +1,38 @@
+# RWKV Benchmark Prompts
+# Various sizes and complexities for comprehensive performance testing
+# Lines starting with # are comments
+
+# === SHORT PROMPTS (Simple Q&A) ===
+What is 2+2?
+What is the capital of France?
+Name three primary colors.
+What year did World War II end?
+Who wrote Romeo and Juliet?
+
+# === MEDIUM PROMPTS (Explanations) ===
+Explain how photosynthesis works in plants.
+What are the main differences between Python and JavaScript?
+Describe the water cycle in simple terms.
+How does a combustion engine work?
+What causes earthquakes and how are they measured?
+
+# === LONGER PROMPTS (Detailed explanations) ===
+Explain the theory of relativity, covering both special and general relativity, and give examples of how they affect our daily lives.
+Describe the process of machine learning, including supervised and unsupervised learning, with examples of each approach.
+What is quantum computing? Explain how it differs from classical computing and discuss potential applications.
+Explain the human immune system, including how it identifies and fights pathogens, and how vaccines work.
+Describe the history and evolution of the internet, from ARPANET to modern cloud computing.
+
+# === CREATIVE TASKS ===
+Write a haiku about programming.
+Write a short poem about the ocean at sunset.
+Create a brief story about a robot learning to paint.
+Write a limerick about a programmer debugging code.
+Compose a short fairy tale about a dragon who was afraid of fire.
+
+# === ANALYTICAL TASKS ===
+Compare and contrast renewable and non-renewable energy sources, discussing advantages, disadvantages, and future outlook for each.
+Analyze the pros and cons of remote work versus office work, considering productivity, work-life balance, and company culture.
+Discuss the ethical implications of artificial intelligence in healthcare, including privacy concerns, decision-making authority, and potential biases.
+Evaluate the impact of social media on modern society, covering mental health, political discourse, and information dissemination.
+Examine the causes and potential solutions for climate change, including individual actions, policy changes, and technological innovations.
