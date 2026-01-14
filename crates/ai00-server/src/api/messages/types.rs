@@ -272,69 +272,71 @@ impl Tool {
         Ok(())
     }
 
-    /// Format this tool as a Hermes-style JSON function definition.
-    pub fn to_hermes_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description.clone().unwrap_or_default(),
-                "parameters": self.input_schema
-            }
-        })
-    }
 }
 
-/// Generate a system prompt section describing available tools (Hermes/Qwen format).
+/// Generate a system prompt section describing available tools (ai00 XML format).
 ///
-/// This function creates tool definitions in the `<tools>` tag format used by
-/// Qwen and other Hermes-style models.
+/// This function creates tool definitions in the `<ai00:available_tools>` XML format
+/// with pretty-printed Anthropic-style JSON (name, description, input_schema).
 ///
 /// The format instructs the model to output tool calls as:
 /// ```text
-/// <tool_call>
-/// {"name": "tool_name", "arguments": {"param": "value"}}
-/// </tool_call>
+/// <ai00:function_calls>
+///   <invoke name="tool_name">
+///     <parameter name="param">value</parameter>
+///   </invoke>
+/// </ai00:function_calls>
 /// ```
 ///
 /// # Arguments
 /// * `tools` - The tool definitions to include
-/// * `tool_header` - Optional custom header (uses default if None)
-/// * `tool_footer` - Optional custom footer (uses default if None)
+/// * `_tool_header` - Deprecated, ignored (kept for API compatibility)
+/// * `_tool_footer` - Deprecated, ignored (kept for API compatibility)
 pub fn generate_tool_system_prompt(
     tools: &[Tool],
-    tool_header: Option<&str>,
-    tool_footer: Option<&str>,
+    _tool_header: Option<&str>,
+    _tool_footer: Option<&str>,
 ) -> String {
     if tools.is_empty() {
         return String::new();
     }
 
-    // Default header and footer
-    const DEFAULT_HEADER: &str = "\n\n# Tools\n\n\
-        You may call one or more functions to assist with the user query.\n\n\
-        You are provided with function signatures within <tools></tools> XML tags:\n\
-        <tools>\n";
+    let mut prompt = String::from("\n\n<ai00:available_tools>\n");
 
-    const DEFAULT_FOOTER: &str = "</tools>\n\n\
-        IMPORTANT: To call a function, use EXACTLY this XML format:\n\
-        <tool_call>\n\
-        {\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n\
-        </tool_call>\n\n\
-        NEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.";
-
-    let header = tool_header.unwrap_or(DEFAULT_HEADER);
-    let footer = tool_footer.unwrap_or(DEFAULT_FOOTER);
-
-    let mut prompt = String::from(header);
-
-    // Add each tool as a JSON line
+    // Add each tool wrapped in <tool name="..."> with pretty-printed JSON
     for tool in tools {
-        prompt.push_str(&serde_json::to_string(&tool.to_hermes_json()).unwrap_or_default());
-        prompt.push('\n');
+        prompt.push_str(&format!("  <tool name=\"{}\">\n", tool.name));
+
+        // Serialize tool as Anthropic-style JSON (name, description, input_schema)
+        let tool_json = serde_json::json!({
+            "name": tool.name,
+            "description": tool.description.clone().unwrap_or_default(),
+            "input_schema": tool.input_schema
+        });
+
+        // Pretty-print and indent each line by 4 spaces
+        if let Ok(pretty) = serde_json::to_string_pretty(&tool_json) {
+            for line in pretty.lines() {
+                prompt.push_str("    ");
+                prompt.push_str(line);
+                prompt.push('\n');
+            }
+        }
+
+        prompt.push_str("  </tool>\n");
     }
 
-    prompt.push_str(footer);
+    prompt.push_str("</ai00:available_tools>\n\n");
+
+    // Tool calling instructions
+    prompt.push_str(
+        "To call a function, use this format:\n\
+         <ai00:function_calls>\n  \
+         <invoke name=\"function_name\">\n    \
+         <parameter name=\"param\">value</parameter>\n  \
+         </invoke>\n\
+         </ai00:function_calls>",
+    );
 
     prompt
 }
