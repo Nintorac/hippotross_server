@@ -3,20 +3,25 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #     "duckdb",
+#     "fast-langdetect",
 # ]
 # ///
 """
 Convert Toucan-1.5M dataset to MessagesRequest JSONL format.
 
 Streams from HuggingFace parquet files and outputs to stdout.
+Includes English language detection and tool-call count filtering.
 
 Usage:
-    # Stream from HuggingFace
+    # Stream from HuggingFace (English-only by default)
     ./toucan_to_messages.py > output.jsonl
     ./toucan_to_messages.py --limit 100 > sample.jsonl
 
-    # Stream directly to make-binidx
-    ./toucan_to_messages.py --limit 1000 | make-binidx -o train -t tokenizer.json -p Config.toml
+    # English + single tool call only (recommended for focused training)
+    ./toucan_to_messages.py --max-tool-calls 1 | make-binidx -o train -t tokenizer.json -p Config.toml
+
+    # Disable language filtering
+    ./toucan_to_messages.py --no-lang-filter | make-binidx ...
 
     # Show sample conversion
     ./toucan_to_messages.py --sample
@@ -31,9 +36,26 @@ import sys
 from typing import Iterator
 
 import duckdb
+from fast_langdetect import detect as detect_lang
 
 # HuggingFace parquet URL for the SFT subset
 DATASET_URL = "hf://datasets/Agent-Ark/Toucan-1.5M/SFT/*.parquet"
+
+
+def is_english(text: str, min_confidence: float = 0.8) -> bool:
+    """Check if text is English with sufficient confidence."""
+    if not text or len(text.strip()) < 10:
+        return False
+    try:
+        result = detect_lang(text)[0]  # returns [{'lang': 'en', 'score': 0.93}]
+        return result["lang"] == "en" and result["score"] >= min_confidence
+    except Exception:
+        return False
+
+
+def count_tool_calls(messages_json: str) -> int:
+    """Count tool_call messages in conversation."""
+    return messages_json.count('"role": "tool_call"')
 
 
 def parse_tool_call(content: str) -> dict:
@@ -205,6 +227,23 @@ Examples:
         help=f"HuggingFace parquet URL (default: {DATASET_URL})",
     )
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
+    parser.add_argument(
+        "--max-tool-calls",
+        type=int,
+        default=None,
+        help="Maximum number of tool calls in conversation (default: no limit)",
+    )
+    parser.add_argument(
+        "--lang-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum confidence for English detection (default: 0.8)",
+    )
+    parser.add_argument(
+        "--no-lang-filter",
+        action="store_true",
+        help="Disable English language filtering",
+    )
     args = parser.parse_args()
 
     con = duckdb.connect()
@@ -218,11 +257,45 @@ Examples:
 
     if not args.quiet:
         print(f"Streaming from: {args.url}", file=sys.stderr)
+        filters = []
+        if not args.no_lang_filter:
+            filters.append(f"lang>=0.8 confidence")
+        if args.max_tool_calls is not None:
+            filters.append(f"max {args.max_tool_calls} tool call(s)")
+        if filters:
+            print(f"Filters: {', '.join(filters)}", file=sys.stderr)
 
     # Stream and convert
     count = 0
     errors = 0
+    filtered_lang = 0
+    filtered_tool_calls = 0
+    processed = 0
+
     for messages_json, tools_json in stream_rows(con, args.limit, args.url):
+        processed += 1
+
+        # Filter by tool call count (fast string check before JSON parse)
+        if args.max_tool_calls is not None:
+            tool_call_count = count_tool_calls(messages_json)
+            if tool_call_count > args.max_tool_calls:
+                filtered_tool_calls += 1
+                continue
+
+        # Parse messages for language check
+        if not args.no_lang_filter:
+            try:
+                messages = json.loads(messages_json)
+                first_user_msg = next(
+                    (m["content"] for m in messages if m["role"] == "user"), ""
+                )
+                if not is_english(first_user_msg, args.lang_confidence):
+                    filtered_lang += 1
+                    continue
+            except (json.JSONDecodeError, KeyError):
+                filtered_lang += 1
+                continue
+
         try:
             result = convert_row(messages_json, tools_json)
             # Remove None values
@@ -237,10 +310,17 @@ Examples:
         except Exception as e:
             errors += 1
             if not args.quiet:
-                print(f"Warning: Failed to convert row {count + errors}: {e}", file=sys.stderr)
+                print(f"Warning: Failed to convert row {processed}: {e}", file=sys.stderr)
 
     if not args.quiet:
-        print(f"Done: {count} converted, {errors} errors", file=sys.stderr)
+        stats = [f"{count} converted"]
+        if filtered_lang > 0:
+            stats.append(f"{filtered_lang} filtered (lang)")
+        if filtered_tool_calls > 0:
+            stats.append(f"{filtered_tool_calls} filtered (tool_calls)")
+        if errors > 0:
+            stats.append(f"{errors} errors")
+        print(f"Done: {', '.join(stats)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

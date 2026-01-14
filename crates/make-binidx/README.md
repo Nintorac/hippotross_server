@@ -90,6 +90,12 @@ The `toucan_to_messages.py` script converts the [Toucan-1.5M](https://huggingfac
   -t assets/tokenizer/rwkv_vocab_v20230424.json \
   -p assets/configs/Config.toml
 
+# English-only, single tool call (recommended for focused training)
+./toucan_to_messages.py --max-tool-calls 1 | make-binidx \
+  -o toucan_single_tool \
+  -t assets/tokenizer/rwkv_vocab_v20230424.json \
+  -p assets/configs/Config.toml
+
 # Preview sample conversion
 ./toucan_to_messages.py --sample
 
@@ -97,10 +103,24 @@ The `toucan_to_messages.py` script converts the [Toucan-1.5M](https://huggingfac
 ./toucan_to_messages.py --limit 1000 > toucan_sample.jsonl
 ```
 
+#### Filtering Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--max-tool-calls N` | No limit | Filter to conversations with ≤N tool calls |
+| `--lang-confidence F` | 0.8 | Minimum confidence for English detection |
+| `--no-lang-filter` | Off | Disable English language filtering |
+
+**Dataset breakdown (119k SFT rows):**
+- ~63k rows pass English + single-tool-call filter
+- ~8k rows filtered as non-English
+- ~48k rows have >1 tool calls
+
 The script handles:
 - Tool calls (`tool_call` role → `tool_use` content blocks)
 - Tool responses (`tool_response` role → `tool_result` content blocks)
 - OpenAI-style tools → Anthropic-style tool definitions
+- English language detection (via fast-langdetect)
 - Streaming I/O for memory efficiency
 
 **Note:** The script is tested with the `SFT` subset. Other subsets (Qwen3-32B, Kimi-K2, GPT-OSS-120B) may have different schemas and would require additional work to extract the correct message/tool configuration
