@@ -317,21 +317,19 @@ fn test_generate_tool_system_prompt_single_tool() {
 
     let result = generate_tool_system_prompt(&tools, None, None);
 
-    // Should use Hermes/Qwen format with <tools> tag
-    assert!(result.contains("<tools>"));
-    assert!(result.contains("</tools>"));
-    assert!(result.contains("<tool_call>"));
-    assert!(result.contains("</tool_call>"));
+    // Should use ai00 XML format
+    assert!(result.contains("<ai00:available_tools>"));
+    assert!(result.contains("</ai00:available_tools>"));
+    assert!(result.contains("<ai00:function_calls>"));
+    assert!(result.contains("<invoke name="));
+    assert!(result.contains("<parameter name="));
 
-    // Should have explicit instructions to use tool_call (not tool_use)
-    assert!(result.contains("IMPORTANT"));
-    assert!(result.contains("NEVER use <tool_use>"));
-
-    // Should contain the tool definition as JSON
-    assert!(result.contains("get_weather"));
+    // Should contain the tool definition with Anthropic-style JSON
+    assert!(result.contains("<tool name=\"get_weather\">"));
     assert!(result.contains("Get the current weather for a location"));
-    // JSON is compact (no spaces after colons)
-    assert!(result.contains("\"type\":\"function\""));
+    // JSON is pretty-printed with proper indentation
+    assert!(result.contains("\"name\": \"get_weather\""));
+    assert!(result.contains("\"input_schema\""));
 }
 
 /// Test generate_tool_system_prompt with multiple tools.
@@ -361,7 +359,7 @@ fn test_generate_tool_system_prompt_multiple_tools() {
     assert!(result.contains("Search the web"));
 }
 
-/// Test generate_tool_system_prompt with custom header and footer.
+/// Test generate_tool_system_prompt ignores custom header/footer (deprecated).
 #[test]
 fn test_generate_tool_system_prompt_custom_prompts() {
     let tools = vec![Tool {
@@ -376,16 +374,17 @@ fn test_generate_tool_system_prompt_custom_prompts() {
 
     let result = generate_tool_system_prompt(&tools, Some(custom_header), Some(custom_footer));
 
-    // Should use custom header and footer
-    assert!(result.starts_with("[TOOLS]"));
-    assert!(result.ends_with("Use tools wisely."));
+    // Custom header/footer are now ignored (deprecated)
+    // Should use ai00 format regardless
+    assert!(result.contains("<ai00:available_tools>"));
+    assert!(result.contains("</ai00:available_tools>"));
     assert!(result.contains("my_tool"));
-    // Should NOT contain default header/footer text
-    assert!(!result.contains("# Tools"));
-    assert!(!result.contains("NEVER use <tool_use>"));
+    // Should NOT use the custom values
+    assert!(!result.contains("[TOOLS]"));
+    assert!(!result.contains("Use tools wisely"));
 }
 
-/// Test generate_tool_system_prompt uses defaults when None provided.
+/// Test generate_tool_system_prompt uses ai00 XML format.
 #[test]
 fn test_generate_tool_system_prompt_defaults() {
     let tools = vec![Tool {
@@ -397,12 +396,12 @@ fn test_generate_tool_system_prompt_defaults() {
 
     let result = generate_tool_system_prompt(&tools, None, None);
 
-    // Should contain default header text
-    assert!(result.contains("# Tools"));
-    assert!(result.contains("function signatures within <tools></tools>"));
-    // Should contain default footer text
-    assert!(result.contains("IMPORTANT: To call a function, use EXACTLY this XML format:"));
-    assert!(result.contains("NEVER use <tool_use>"));
+    // Should have ai00 XML format
+    assert!(result.contains("<ai00:available_tools>"));
+    assert!(result.contains("</ai00:available_tools>"));
+    assert!(result.contains("<tool name=\"test_tool\">"));
+    // Should have tool calling instructions
+    assert!(result.contains("<ai00:function_calls>"));
 }
 
 /// Test PromptsConfig default values.
@@ -556,10 +555,12 @@ fn test_mixed_text_and_tool_result() {
     assert!(text.contains("42"));
 }
 
-/// Test Tool::to_hermes_json formatting.
+/// Test generate_tool_system_prompt formatting.
 #[test]
-fn test_tool_to_hermes_json() {
-    let tool = Tool {
+fn test_generate_tool_system_prompt() {
+    use ai00_server::api::messages::generate_tool_system_prompt;
+
+    let tools = vec![Tool {
         name: "calculate".to_string(),
         description: Some("Perform arithmetic calculations".to_string()),
         input_schema: json!({
@@ -570,15 +571,23 @@ fn test_tool_to_hermes_json() {
             "required": ["expression"]
         }),
         cache_control: None,
-    };
+    }];
 
-    let json = tool.to_hermes_json();
+    let result = generate_tool_system_prompt(&tools, None, None);
 
-    // Should have Hermes function format
-    assert_eq!(json["type"], "function");
-    assert_eq!(json["function"]["name"], "calculate");
-    assert_eq!(json["function"]["description"], "Perform arithmetic calculations");
-    assert!(json["function"]["parameters"]["properties"]["expression"].is_object());
+    // Should have ai00 XML format
+    assert!(result.contains("<ai00:available_tools>"));
+    assert!(result.contains("</ai00:available_tools>"));
+    assert!(result.contains("<tool name=\"calculate\">"));
+    assert!(result.contains("</tool>"));
+    // Should have Anthropic-style JSON fields
+    assert!(result.contains("\"name\": \"calculate\""));
+    assert!(result.contains("\"description\": \"Perform arithmetic calculations\""));
+    assert!(result.contains("\"input_schema\""));
+    // Should have tool calling instructions
+    assert!(result.contains("<ai00:function_calls>"));
+    assert!(result.contains("<invoke name="));
+    assert!(result.contains("<parameter name="));
 }
 
 // =============================================================================

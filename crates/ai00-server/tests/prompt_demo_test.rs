@@ -17,27 +17,28 @@ fn build_prompt(
 ) -> String {
     let mut prompt = String::new();
 
-    // Add system prompt first
+    // Add system prompt with XML turn markers
     if let Some(sys) = system {
-        prompt.push_str(&format!("{}: {}", prompts.role_system, sys));
+        prompt.push_str(&format!("<ai00:{}>\n", prompts.role_system));
+        prompt.push_str(sys);
 
         // Inject tool definitions into system prompt if provided
         if let Some(tools) = tools {
             if !tools.is_empty() {
-                prompt.push_str(&generate_tool_system_prompt(tools, prompts));
+                prompt.push_str(&generate_tool_system_prompt(tools));
             }
         }
 
-        prompt.push_str("\n\n");
+        prompt.push_str(&format!("\n</ai00:{}>\n\n", prompts.role_system));
     } else if let Some(tools) = tools {
         if !tools.is_empty() {
-            prompt.push_str(&format!("{}:", prompts.role_system));
-            prompt.push_str(&generate_tool_system_prompt(tools, prompts));
-            prompt.push_str("\n\n");
+            prompt.push_str(&format!("<ai00:{}>\n", prompts.role_system));
+            prompt.push_str(&generate_tool_system_prompt(tools));
+            prompt.push_str(&format!("\n</ai00:{}>\n\n", prompts.role_system));
         }
     }
 
-    // Format conversation messages
+    // Format conversation messages with XML turn markers
     let msg_count = messages.len();
     for (i, msg) in messages.iter().enumerate() {
         let role = match msg.role {
@@ -54,7 +55,10 @@ fn build_prompt(
             ""
         };
 
-        prompt.push_str(&format!("{}: {}{}\n\n", role, content, think_suffix));
+        prompt.push_str(&format!(
+            "<ai00:{}>\n{}{}\n</ai00:{}>\n\n",
+            role, content, think_suffix, role
+        ));
     }
 
     // Add assistant prefix for generation
@@ -81,17 +85,43 @@ fn get_thinking_suffix<'a>(
     }
 }
 
-fn generate_tool_system_prompt(tools: &[Tool], prompts: &PromptsConfig) -> String {
-    let mut result = String::new();
-    result.push_str(&prompts.tool_header);
-
-    for tool in tools {
-        let tool_json = tool.to_hermes_json();
-        result.push_str(&serde_json::to_string(&tool_json).unwrap());
-        result.push('\n');
+fn generate_tool_system_prompt(tools: &[Tool]) -> String {
+    if tools.is_empty() {
+        return String::new();
     }
 
-    result.push_str(&prompts.tool_footer);
+    let mut result = String::from("\n\n<ai00:available_tools>\n");
+
+    for tool in tools {
+        result.push_str(&format!("  <tool name=\"{}\">\n", tool.name));
+
+        let tool_json = json!({
+            "name": tool.name,
+            "description": tool.description.clone().unwrap_or_default(),
+            "input_schema": tool.input_schema
+        });
+
+        if let Ok(pretty) = serde_json::to_string_pretty(&tool_json) {
+            for line in pretty.lines() {
+                result.push_str("    ");
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+
+        result.push_str("  </tool>\n");
+    }
+
+    result.push_str("</ai00:available_tools>\n\n");
+    result.push_str(
+        "To call a function, use this format:\n\
+         <ai00:function_calls>\n  \
+         <invoke name=\"function_name\">\n    \
+         <parameter name=\"param\">value</parameter>\n  \
+         </invoke>\n\
+         </ai00:function_calls>",
+    );
+
     result
 }
 
@@ -161,4 +191,13 @@ fn demo_prompt_output() {
     // Write to file for inspection
     std::fs::write("/tmp/ai00_prompt_output.txt", &prompt).unwrap();
     println!("Written to /tmp/ai00_prompt_output.txt");
+
+    // Verify new format elements
+    assert!(prompt.contains("<ai00:system>"));
+    assert!(prompt.contains("</ai00:system>"));
+    assert!(prompt.contains("<ai00:user>"));
+    assert!(prompt.contains("</ai00:user>"));
+    assert!(prompt.contains("<ai00:assistant>"));
+    assert!(prompt.contains("<ai00:available_tools>"));
+    assert!(prompt.contains("<tool name=\"get_weather\">"));
 }
