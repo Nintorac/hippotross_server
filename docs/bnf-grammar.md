@@ -22,7 +22,7 @@ No grammar constraints. Model output is unconstrained.
 
 ### `structural`
 
-Enforces correct syntax for thinking blocks and tool calls without validating tool schemas.
+Enforces correct syntax for thinking blocks and function calls without validating tool schemas.
 
 ```json
 {
@@ -32,8 +32,8 @@ Enforces correct syntax for thinking blocks and tool calls without validating to
 
 The structural grammar validates:
 - `<think>...</think>` blocks are properly closed
-- `<tool_call>...</tool_call>` blocks are properly closed
-- Tool JSON has `name` and `arguments` fields
+- `<ai00:function_calls>...</ai00:function_calls>` blocks are properly closed
+- `<invoke>` and `<parameter>` structure is correct
 - Response terminates with stop sequences
 
 ### `schema_aware`
@@ -55,59 +55,88 @@ SchemaAware additionally validates:
 The grammar uses a unified structure that handles all combinations of thinking and tools:
 
 ```ebnf
-start         ::= thinking? content
+start           ::= thinking? content
+thinking        ::= '<think>' #ex'</think>' '</think>' ws
 
-thinking      ::= '<think>' #ex'</think>' '</think>' ws
+content         ::= function_calls | text_response
 
-content       ::= tool_call | text_response
+function_calls  ::= #ex'<ai00:function_calls>' '<ai00:function_calls>\n' invokes '</ai00:function_calls>'
+invokes         ::= invoke*
+invoke          ::= '  <invoke name="' tool_name '">\n' params '  </invoke>\n'
+params          ::= param*
+param           ::= '    <parameter name="' param_name '">' param_value '</parameter>\n'
 
-tool_call     ::= #ex'<tool_call>' '<tool_call>' ws tool_json ws '</tool_call>'
+tool_name       ::= #'[a-zA-Z0-9_-]+'
+param_name      ::= #'[a-zA-Z0-9_]+'
+param_value     ::= #ex'</parameter>'
 
-text_response ::= #'.*' terminator
-
-tool_json     ::= '{' ws '"name"' ws ':' ws string ws ',' ws '"arguments"' ws ':' ws json_object ws '}'
+text_response   ::= #ex'<ai00:function_calls>' #'[\s\S]*' terminator
 ```
 
 ### Key Design Decisions
 
 1. **Thinking is always optional**: The grammar allows `<think>` blocks regardless of configuration. This prevents conflicts when models spontaneously decide to "think".
 
-2. **Tool call terminates**: A `</tool_call>` tag acts as an implicit terminator, allowing the system to inject tool responses.
+2. **Function calls terminate**: The grammar naturally completes at `</ai00:function_calls>`, triggering `stop_reason: tool_use`.
 
-3. **Text requires terminator**: Text-only responses require an explicit terminator (e.g., `\n\n`).
+3. **Text requires terminator**: Text-only responses require an explicit terminator (e.g., `</ai00:assistant>`).
 
-4. **Complement regex**: The `#ex'pattern'` syntax matches any text NOT containing the pattern, allowing `<` characters in regular text (e.g., "2 < 3").
+4. **Complement regex**: The `#ex'pattern'` syntax matches any text NOT containing the pattern, allowing `<` characters in regular text and parameter values.
 
 ## Valid Output Patterns
 
 ### Plain Text
 ```
 Hello, how can I help you?
-
+</ai00:assistant>
 ```
 
 ### Thinking + Text
 ```
 <think>Let me consider this question...</think>
 The answer is 42.
-
+</ai00:assistant>
 ```
 
-### Tool Call (Single)
-```
-<tool_call>{"name": "get_weather", "arguments": {"location": "Tokyo"}}</tool_call>
+### Function Call (Single)
+```xml
+<ai00:function_calls>
+  <invoke name="get_weather">
+    <parameter name="location">Tokyo</parameter>
+  </invoke>
+</ai00:function_calls>
 ```
 
-### Thinking + Tool Call
-```
+### Thinking + Function Call
+```xml
 <think>I should check the weather first.</think>
-<tool_call>{"name": "get_weather", "arguments": {"location": "Tokyo"}}</tool_call>
+<ai00:function_calls>
+  <invoke name="get_weather">
+    <parameter name="location">Tokyo</parameter>
+  </invoke>
+</ai00:function_calls>
 ```
 
-### Text Before Tool Call
-```
+### Text Before Function Call
+```xml
 Let me search for that information.
-<tool_call>{"name": "web_search", "arguments": {"query": "AI news"}}</tool_call>
+<ai00:function_calls>
+  <invoke name="web_search">
+    <parameter name="query">AI news</parameter>
+  </invoke>
+</ai00:function_calls>
+```
+
+### Multiple Parallel Function Calls
+```xml
+<ai00:function_calls>
+  <invoke name="get_weather">
+    <parameter name="city">Tokyo</parameter>
+  </invoke>
+  <invoke name="get_weather">
+    <parameter name="city">London</parameter>
+  </invoke>
+</ai00:function_calls>
 ```
 
 ## API Configuration
@@ -138,7 +167,7 @@ When `bnf_validation` is not specified, the system auto-enables `structural` val
     }
   ],
   "bnf_validation": "structural",
-  "stop": ["\n\n"]
+  "stop": ["</ai00:assistant>"]
 }
 ```
 
@@ -159,13 +188,17 @@ When thinking is enabled with a custom grammar, the system automatically wraps i
 
 ### Model output is truncated
 
-Check that your stop sequences are properly configured. The grammar requires a terminator for text responses.
+Check that your stop sequences are properly configured. The default stop sequence is `</ai00:assistant>`.
 
-### Tool calls fail to parse
+### Function calls fail to parse
 
-Ensure tool JSON has both `name` and `arguments` fields:
-```json
-{"name": "tool_name", "arguments": {"key": "value"}}
+Ensure the output follows the XML structure:
+```xml
+<ai00:function_calls>
+  <invoke name="tool_name">
+    <parameter name="key">value</parameter>
+  </invoke>
+</ai00:function_calls>
 ```
 
 ### Grammar compilation errors
