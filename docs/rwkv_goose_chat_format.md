@@ -176,6 +176,30 @@ default_stop_sequences = ["</ai00:assistant>"]
 | `System: content` | `<ai00:system>\ncontent\n</ai00:system>` |
 | `<tool_call>{"name":...}</tool_call>` | `<ai00:function_calls><invoke name="...">...</invoke></ai00:function_calls>` |
 
+## Validating Format
+
+Use `make-binidx` with the Toucan dataset to verify prompt formatting:
+
+```bash
+cd crates/make-binidx
+
+# Generate sample prompts from Toucan-1.5M (single tool call examples)
+./toucan_to_messages.py --limit 1000 --max-tool-calls 1 > /tmp/toucan.jsonl
+
+# Inspect formatted prompts
+cargo run -p make-binidx --release -- \
+  --input /tmp/toucan.jsonl \
+  --prompts-config ../../assets/configs/Config.toml \
+  --text-only \
+  --separator "=====" > /tmp/ai00_examples.txt
+```
+
+Key things to verify in the output:
+- Tool results (`<ai00:function_results>`) appear immediately after `</ai00:function_calls>`
+- No `<ai00:user>` wrapper around tool results
+- Assistant continuation after tool results is in the same `<ai00:assistant>` turn
+- Only one `</ai00:assistant>` closing tag per complete tool-call flow
+
 ## Recommended Sampling Parameters
 
 From the RWKV7-G1 documentation:

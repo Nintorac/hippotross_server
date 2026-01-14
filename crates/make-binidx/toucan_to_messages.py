@@ -77,14 +77,20 @@ def parse_tool_call(content: str) -> dict:
 
 
 def convert_tools(tools_json: str) -> list[dict]:
-    """Convert OpenAI-style tools to Anthropic-style."""
+    """Convert OpenAI-style tools to Anthropic-style, deduplicating by name."""
     tools = json.loads(tools_json)
+    seen_names = set()
     result = []
     for tool in tools:
         if tool.get("type") == "function":
             func = tool["function"]
+            name = func["name"]
+            # Skip duplicates (Toucan dataset has some)
+            if name in seen_names:
+                continue
+            seen_names.add(name)
             result.append({
-                "name": func["name"],
+                "name": name,
                 "description": func.get("description", ""),
                 "input_schema": func.get("parameters", {"type": "object"}),
             })
@@ -169,12 +175,10 @@ def convert_messages(messages_json: str) -> list[dict]:
 
 
 def stream_rows(
-    con: duckdb.DuckDBPyConnection, limit: int | None = None, url: str = DATASET_URL
+    con: duckdb.DuckDBPyConnection, url: str = DATASET_URL
 ) -> Iterator[tuple]:
     """Stream rows from the dataset."""
     query = f"SELECT messages, tools FROM '{url}'"
-    if limit:
-        query += f" LIMIT {limit}"
 
     # Use fetchmany for streaming
     result = con.execute(query)
@@ -219,7 +223,7 @@ Examples:
   %(prog)s --limit 1000 | make-binidx -o train -t tokenizer.json -p Config.toml
         """,
     )
-    parser.add_argument("--limit", type=int, help="Limit number of rows to process")
+    parser.add_argument("--limit", type=int, help="Limit number of accepted rows (after filtering)")
     parser.add_argument("--sample", action="store_true", help="Print sample conversion and exit")
     parser.add_argument(
         "--url",
@@ -272,7 +276,7 @@ Examples:
     filtered_tool_calls = 0
     processed = 0
 
-    for messages_json, tools_json in stream_rows(con, args.limit, args.url):
+    for messages_json, tools_json in stream_rows(con, args.url):
         processed += 1
 
         # Filter by tool call count (fast string check before JSON parse)
@@ -306,6 +310,10 @@ Examples:
             # Progress indicator
             if not args.quiet and count % 1000 == 0:
                 print(f"  Converted {count} rows...", file=sys.stderr)
+
+            # Stop when we've reached the limit of accepted rows
+            if args.limit and count >= args.limit:
+                break
 
         except Exception as e:
             errors += 1

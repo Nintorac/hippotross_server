@@ -93,14 +93,22 @@ fn test_text_only_from_file() {
         "Should process 2 prompts"
     );
 
-    // Check output contains expected content (uses default RWKV7-G1 format)
-    assert!(stdout.contains("System: You are helpful."), "Missing system");
-    assert!(stdout.contains("User: Hi"), "Missing user message");
-    assert!(
-        stdout.contains("Assistant: Hello!"),
-        "Missing assistant response"
-    );
+    // Check output contains expected content (uses ai00 XML format)
+    assert!(stdout.contains("<ai00:system>"), "Missing system opening tag");
+    assert!(stdout.contains("You are helpful."), "Missing system content");
+    assert!(stdout.contains("</ai00:system>"), "Missing system closing tag");
+    assert!(stdout.contains("<ai00:user>"), "Missing user opening tag");
+    assert!(stdout.contains("Hi"), "Missing user message");
+    assert!(stdout.contains("</ai00:user>"), "Missing user closing tag");
+    assert!(stdout.contains("<ai00:assistant>"), "Missing assistant opening tag");
+    assert!(stdout.contains("Hello!"), "Missing assistant response");
+    assert!(stdout.contains("</ai00:assistant>"), "Missing assistant closing tag");
     assert!(stdout.contains("---"), "Missing separator between prompts");
+    // Training prompts should NOT have trailing assistant prefix
+    assert!(
+        !stdout.ends_with("<ai00:assistant>\n"),
+        "Should not have trailing assistant prefix"
+    );
 }
 
 #[test]
@@ -140,7 +148,9 @@ fn test_text_only_from_stdin() {
         stderr.contains("Streaming from stdin"),
         "Should indicate stdin source"
     );
-    assert!(stdout.contains("User: Stdin test"), "Missing stdin content");
+    assert!(stdout.contains("<ai00:user>"), "Missing user opening tag");
+    assert!(stdout.contains("Stdin test"), "Missing stdin content");
+    assert!(stdout.contains("</ai00:user>"), "Missing user closing tag");
 }
 
 #[test]

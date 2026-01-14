@@ -124,6 +124,22 @@ impl Default for MessageContent {
 }
 
 impl MessageContent {
+    /// Check if this message contains only tool_result blocks.
+    ///
+    /// Used by prompt building to skip turn wrappers for tool results,
+    /// which should be injected directly after function_calls.
+    pub fn is_tool_result_only(&self) -> bool {
+        match self {
+            MessageContent::Text(_) => false,
+            MessageContent::Blocks(blocks) => {
+                !blocks.is_empty()
+                    && blocks.iter().all(|b| {
+                        matches!(b, ContentBlock::ToolResult { .. })
+                    })
+            }
+        }
+    }
+
     /// Extract text content from message, concatenating text blocks.
     /// Tool-related blocks are formatted in ai00 v1 XML format:
     /// - ToolUse becomes `<ai00:function_calls><invoke name="..."><parameter>...</parameter></invoke></ai00:function_calls>`
