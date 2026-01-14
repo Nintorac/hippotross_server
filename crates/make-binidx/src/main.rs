@@ -11,7 +11,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 
-use ai00_server::api::messages::prompt::build_prompt;
+use ai00_server::api::messages::prompt::build_training_prompt;
 use ai00_server::api::messages::MessagesRequest;
 use ai00_server::config::Config;
 use anyhow::{Context, Result};
@@ -167,8 +167,8 @@ fn run_text_only(args: &Args) -> Result<()> {
             continue;
         };
 
-        // Build prompt using exact server code path
-        let prompt = build_prompt(
+        // Build training prompt (no trailing assistant prefix)
+        let prompt = build_training_prompt(
             req.system.as_deref(),
             &req.messages,
             req.tools.as_deref(),
@@ -229,8 +229,8 @@ fn run_binidx(args: &Args) -> Result<()> {
             continue;
         };
 
-        // Build prompt using exact server code path
-        let prompt = build_prompt(
+        // Build training prompt (no trailing assistant prefix)
+        let prompt = build_training_prompt(
             req.system.as_deref(),
             &req.messages,
             req.tools.as_deref(),
