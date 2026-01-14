@@ -125,9 +125,9 @@ impl Default for MessageContent {
 
 impl MessageContent {
     /// Extract text content from message, concatenating text blocks.
-    /// Tool-related blocks are formatted in Hermes/Qwen style:
-    /// - ToolUse becomes `<tool_call>{"name": ..., "arguments": ...}</tool_call>`
-    /// - ToolResult becomes `<tool_response>{"name": ..., "content": ...}</tool_response>`
+    /// Tool-related blocks are formatted in ai00 v1 XML format:
+    /// - ToolUse becomes `<ai00:function_calls><invoke name="..."><parameter>...</parameter></invoke></ai00:function_calls>`
+    /// - ToolResult becomes `<ai00:function_results><result name="...">...</result></ai00:function_results>`
     /// - Thinking becomes `<think>...</think>` for training data alignment
     pub fn to_text(&self) -> String {
         match self {
@@ -141,38 +141,89 @@ impl MessageContent {
                         Some(format!("<think>{}</think>", thinking))
                     }
                     ContentBlock::ToolUse { name, input, .. } => {
-                        // Format as Hermes-style tool_call for context in continued conversations
-                        let call = serde_json::json!({
-                            "name": name,
-                            "arguments": input
-                        });
-                        Some(format!(
-                            "<tool_call>\n{}\n</tool_call>",
-                            serde_json::to_string(&call).unwrap_or_default()
-                        ))
+                        // Format as ai00 function_calls for context in continued conversations
+                        Some(format_tool_use_as_ai00(name, input))
                     }
                     ContentBlock::ToolResult {
                         tool_use_id,
                         content,
                         is_error,
                     } => {
-                        // Format as Hermes-style tool_response
-                        let result_text = content.to_text();
-                        let response = serde_json::json!({
-                            "tool_use_id": tool_use_id,
-                            "content": result_text,
-                            "is_error": is_error
-                        });
-                        Some(format!(
-                            "<tool_response>\n{}\n</tool_response>",
-                            serde_json::to_string(&response).unwrap_or_default()
-                        ))
+                        // Format as ai00 function_results
+                        Some(format_tool_result_as_ai00(tool_use_id, content, *is_error))
                     }
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
     }
+}
+
+/// Format a ToolUse content block as ai00 XML.
+fn format_tool_use_as_ai00(name: &str, input: &serde_json::Value) -> String {
+    let mut result = String::from("<ai00:function_calls>\n  <invoke name=\"");
+    result.push_str(name);
+    result.push_str("\">\n");
+
+    // Format parameters from input object
+    if let Some(obj) = input.as_object() {
+        for (key, value) in obj {
+            result.push_str("    <parameter name=\"");
+            result.push_str(key);
+            result.push_str("\">");
+
+            // Format value: use raw string for strings, JSON for other types
+            if let Some(s) = value.as_str() {
+                result.push_str(s);
+            } else {
+                result.push_str(&value.to_string());
+            }
+
+            result.push_str("</parameter>\n");
+        }
+    }
+
+    result.push_str("  </invoke>\n</ai00:function_calls>");
+    result
+}
+
+/// Format a ToolResult content block as ai00 XML.
+fn format_tool_result_as_ai00(
+    tool_use_id: &str,
+    content: &ToolResultContent,
+    is_error: bool,
+) -> String {
+    let result_text = content.to_text();
+
+    // Try to pretty-print if valid JSON, otherwise use raw text
+    let formatted_content = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&result_text)
+    {
+        // Pretty-print with 4-space indent
+        if let Ok(pretty) = serde_json::to_string_pretty(&json) {
+            let mut indented = String::new();
+            for line in pretty.lines() {
+                indented.push_str("    ");
+                indented.push_str(line);
+                indented.push('\n');
+            }
+            indented.trim_end().to_string()
+        } else {
+            format!("    {}", result_text)
+        }
+    } else {
+        format!("    {}", result_text)
+    };
+
+    // Extract tool name from tool_use_id (format: toolu_XXXX -> use as identifier)
+    // In real usage, the handler should look up the actual tool name
+    let tool_name = tool_use_id;
+
+    let error_attr = if is_error { " is_error=\"true\"" } else { "" };
+
+    format!(
+        "<ai00:function_results>\n  <result name=\"{}\"{}>\n{}\n  </result>\n</ai00:function_results>",
+        tool_name, error_attr, formatted_content
+    )
 }
 
 /// A message in the conversation.
@@ -671,9 +722,26 @@ mod tests {
         }]);
 
         let text = content.to_text();
-        assert!(text.contains("<tool_call>"));
-        assert!(text.contains("</tool_call>"));
-        assert!(text.contains("get_weather"));
-        assert!(text.contains("Paris"));
+        // Should use ai00 format
+        assert!(text.contains("<ai00:function_calls>"));
+        assert!(text.contains("</ai00:function_calls>"));
+        assert!(text.contains("<invoke name=\"get_weather\">"));
+        assert!(text.contains("<parameter name=\"location\">Paris</parameter>"));
+    }
+
+    #[test]
+    fn test_tool_result_to_text() {
+        let content = MessageContent::Blocks(vec![ContentBlock::ToolResult {
+            tool_use_id: "tool_123".to_string(),
+            content: ToolResultContent::Text("{\"temp\": 22}".to_string()),
+            is_error: false,
+        }]);
+
+        let text = content.to_text();
+        // Should use ai00 format
+        assert!(text.contains("<ai00:function_results>"));
+        assert!(text.contains("</ai00:function_results>"));
+        assert!(text.contains("<result name=\"tool_123\">"));
+        assert!(text.contains("\"temp\": 22"));
     }
 }
