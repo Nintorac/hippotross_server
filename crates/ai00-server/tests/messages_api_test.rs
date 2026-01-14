@@ -453,9 +453,10 @@ fn test_tool_result_string_content() {
     let msg: MessageParam = serde_json::from_value(json).unwrap();
     let text = msg.content.to_text();
 
-    assert!(text.contains("<tool_response>"));
-    assert!(text.contains("</tool_response>"));
-    assert!(text.contains("toolu_01abc123"));
+    // Should use ai00 format
+    assert!(text.contains("<ai00:function_results>"));
+    assert!(text.contains("</ai00:function_results>"));
+    assert!(text.contains("<result name=\"toolu_01abc123\">"));
     assert!(text.contains("72°F"));
 }
 
@@ -479,8 +480,9 @@ fn test_tool_result_array_content() {
     let msg: MessageParam = serde_json::from_value(json).unwrap();
     let text = msg.content.to_text();
 
-    assert!(text.contains("<tool_response>"));
-    assert!(text.contains("toolu_02xyz789"));
+    // Should use ai00 format
+    assert!(text.contains("<ai00:function_results>"));
+    assert!(text.contains("<result name=\"toolu_02xyz789\">"));
     assert!(text.contains("Search results:"));
     assert!(text.contains("First result"));
 }
@@ -503,12 +505,13 @@ fn test_tool_result_with_error() {
     let msg: MessageParam = serde_json::from_value(json).unwrap();
     let text = msg.content.to_text();
 
-    assert!(text.contains("<tool_response>"));
-    assert!(text.contains("\"is_error\":true"));
+    // Should use ai00 format with is_error attribute
+    assert!(text.contains("<ai00:function_results>"));
+    assert!(text.contains("is_error=\"true\""));
     assert!(text.contains("rate limit"));
 }
 
-/// Test tool_use in assistant message formats as tool_call.
+/// Test tool_use in assistant message formats as ai00:function_calls.
 #[test]
 fn test_tool_use_in_assistant_message() {
     let json = json!({
@@ -526,9 +529,10 @@ fn test_tool_use_in_assistant_message() {
     let msg: MessageParam = serde_json::from_value(json).unwrap();
     let text = msg.content.to_text();
 
-    assert!(text.contains("<tool_call>"));
-    assert!(text.contains("</tool_call>"));
-    assert!(text.contains("get_weather"));
+    // Should use ai00 format
+    assert!(text.contains("<ai00:function_calls>"));
+    assert!(text.contains("</ai00:function_calls>"));
+    assert!(text.contains("<invoke name=\"get_weather\">"));
     assert!(text.contains("San Francisco"));
 }
 
@@ -551,7 +555,8 @@ fn test_mixed_text_and_tool_result() {
     let text = msg.content.to_text();
 
     assert!(text.contains("Here's the result:"));
-    assert!(text.contains("<tool_response>"));
+    // Should use ai00 format
+    assert!(text.contains("<ai00:function_results>"));
     assert!(text.contains("42"));
 }
 
@@ -680,8 +685,9 @@ fn test_conversation_flow_with_tools() {
     let assistant: MessageParam = serde_json::from_value(assistant_msg).unwrap();
     let assistant_text = assistant.content.to_text();
     assert!(assistant_text.contains("I'll check the weather"));
-    assert!(assistant_text.contains("<tool_call>"));
-    assert!(assistant_text.contains("get_weather"));
+    // Should use ai00 format
+    assert!(assistant_text.contains("<ai00:function_calls>"));
+    assert!(assistant_text.contains("<invoke name=\"get_weather\">"));
 
     // Third turn: user provides tool_result
     let user_result_msg = json!({
@@ -696,8 +702,9 @@ fn test_conversation_flow_with_tools() {
     });
     let user_result: MessageParam = serde_json::from_value(user_result_msg).unwrap();
     let result_text = user_result.content.to_text();
-    assert!(result_text.contains("<tool_response>"));
-    assert!(result_text.contains("toolu_01weather123"));
+    // Should use ai00 format
+    assert!(result_text.contains("<ai00:function_results>"));
+    assert!(result_text.contains("<result name=\"toolu_01weather123\">"));
     assert!(result_text.contains("18°C"));
 }
 
