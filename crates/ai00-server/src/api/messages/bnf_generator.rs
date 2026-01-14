@@ -321,7 +321,16 @@ pub fn generate_tool_grammars(tools: &[Tool]) -> String {
 /// Note: Unlike the structural grammar, SchemaAware validates tool names
 /// and argument schemas against the provided tool definitions.
 pub fn generate_schema_aware_grammar(tools: &[Tool]) -> String {
-    use super::bnf_grammars::GRAMMAR_JSON_PRIMITIVES;
+    use super::bnf_grammars::{GRAMMAR_JSON_PRIMITIVES, GRAMMAR_UNIFIED};
+
+    // If no tools provided, fall back to structural grammar
+    if tools.is_empty() {
+        let mut grammar = String::new();
+        grammar.push_str(GRAMMAR_JSON_PRIMITIVES);
+        grammar.push('\n');
+        grammar.push_str(GRAMMAR_UNIFIED);
+        return grammar;
+    }
 
     let mut grammar = String::new();
 
@@ -330,15 +339,22 @@ pub fn generate_schema_aware_grammar(tools: &[Tool]) -> String {
     grammar.push('\n');
 
     // Unified structure with thinking always optional
-    // Uses complement regex to allow < in text before tool calls
-    // Note: `tool_call` is defined by generate_tool_grammars as a dispatch rule
+    // Uses complement regex to allow < in text before function calls
+    // The schema-aware grammar validates tool schemas but uses the same XML format
     grammar.push_str(r#"
 start::=thinking? content;
 thinking::='<think>' #ex'</think>' '</think>' ws;
-content::=tool_call_block | text_response;
-tool_call_block::=#ex'<tool_call>' '<tool_call>' ws tool_call ws '</tool_call>';
+content::=function_calls_block | text_response;
+function_calls_block::=#ex'<ai00:function_calls>' '<ai00:function_calls>\n' invokes '</ai00:function_calls>';
+invokes::=invoke*;
+invoke::='  <invoke name="' tool_name '">\n' '    <parameter name="input">' tool_call '</parameter>\n' '  </invoke>\n';
 text_response::=#'.*' terminator;
 "#);
+    grammar.push('\n');
+
+    // Tool name rule (alternation of valid tool names)
+    // This defines `tool_name::='tool1' | 'tool2' | ...`
+    grammar.push_str(&generate_tool_name_grammar(tools));
     grammar.push('\n');
 
     // Tool-specific rules (validates tool names and schemas)
@@ -785,10 +801,10 @@ mod tests {
         assert!(grammar.contains("<think>"));
         assert!(grammar.contains("</think>"));
 
-        // Should have tool structure
-        assert!(grammar.contains("tool_call"));
-        assert!(grammar.contains("<tool_call>"));
-        assert!(grammar.contains("</tool_call>"));
+        // Should have function calls structure (ai00 XML format)
+        assert!(grammar.contains("function_calls_block"));
+        assert!(grammar.contains("<ai00:function_calls>"));
+        assert!(grammar.contains("</ai00:function_calls>"));
 
         // Should use complement regex
         assert!(grammar.contains("#ex'"));
@@ -827,8 +843,8 @@ mod tests {
         assert!(grammar.contains("start::="));
         assert!(grammar.contains("thinking"));
         assert!(grammar.contains("content"));
-        assert!(grammar.contains("<tool_call>"));
-        assert!(grammar.contains("</tool_call>"));
+        assert!(grammar.contains("<ai00:function_calls>"));
+        assert!(grammar.contains("</ai00:function_calls>"));
 
         // Tool dispatch (schema-aware generates per-tool rules)
         assert!(grammar.contains("get_weather_call"));
@@ -866,9 +882,9 @@ mod tests {
         assert!(result.is_some());
 
         let grammar = result.unwrap();
-        // Unified grammar always has both thinking and tools
+        // Unified grammar always has both thinking and function calls
         assert!(grammar.contains("<think>"));
-        assert!(grammar.contains("<tool_call>"));
+        assert!(grammar.contains("<ai00:function_calls>"));
         assert!(grammar.contains("terminator::="));
     }
 
@@ -904,7 +920,7 @@ mod tests {
         let grammar = result.unwrap();
         // Unified grammar has both (but no tool-specific rules)
         assert!(grammar.contains("<think>"));
-        assert!(grammar.contains("<tool_call>"));
+        assert!(grammar.contains("<ai00:function_calls>"));
         // No tool-specific rules since no tools provided (check for pattern like "get_weather_call")
         // The grammar should not have tool-specific dispatch rules
         assert!(!grammar.contains("_input"), "Should not have tool-specific input rules");

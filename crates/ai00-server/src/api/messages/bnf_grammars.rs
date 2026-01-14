@@ -10,10 +10,21 @@
 //! ## Key Design Decisions
 //!
 //! - `#ex'pattern'` = KBNF complement regex (matches text NOT containing pattern)
-//! - `</tool_call>` acts as implicit terminator (no `\n\n` needed after)
-//! - Single tool call per turn (system injects response, model continues)
+//! - `</ai00:function_calls>` acts as implicit terminator (grammar completion)
+//! - Single function_calls block per turn (system injects response, model continues)
 //! - Only text-only responses require explicit terminator
-//! - Allows `<` in text before tool calls (e.g., "2 < 3")
+//! - Allows `<` in text before function calls (e.g., "2 < 3")
+//!
+//! ## ai00 XML Tool Format
+//!
+//! Tool calls use XML-based format instead of JSON:
+//! ```xml
+//! <ai00:function_calls>
+//!   <invoke name="get_weather">
+//!     <parameter name="city">Tokyo</parameter>
+//!   </invoke>
+//! </ai00:function_calls>
+//! ```
 
 /// Generic JSON grammar primitives.
 ///
@@ -44,8 +55,8 @@ ws::=#'[ \\t\\n\\r]*';
 /// This grammar handles all combinations:
 /// - Plain text responses (requires terminator)
 /// - Thinking + text responses (requires terminator)
-/// - Tool call responses (terminates at `</tool_call>`)
-/// - Thinking + tool call responses (terminates at `</tool_call>`)
+/// - Function calls (terminates at `</ai00:function_calls>`)
+/// - Thinking + function calls (terminates at `</ai00:function_calls>`)
 ///
 /// The grammar uses KBNF's complement regex (`#ex'pattern'`) to match text
 /// that does not contain specific tags, allowing `<` characters in regular text.
@@ -55,18 +66,34 @@ ws::=#'[ \\t\\n\\r]*';
 /// ```text
 /// start ::= thinking? content
 /// thinking ::= '<think>' ... '</think>'
-/// content ::= tool_call | text_response
+/// content ::= function_calls | text_response
 /// ```
 ///
-/// Tool calls terminate the grammar (allowing tool response injection).
-/// Text-only responses require an explicit terminator (e.g., `\n\n`).
+/// Function calls terminate the grammar (allowing result injection).
+/// Text-only responses require an explicit terminator (e.g., `</ai00:assistant>`).
+///
+/// ## Output Format
+///
+/// ```xml
+/// <ai00:function_calls>
+///   <invoke name="tool_name">
+///     <parameter name="param1">value1</parameter>
+///   </invoke>
+/// </ai00:function_calls>
+/// ```
 pub const GRAMMAR_UNIFIED: &str = r#"
 start::=thinking? content;
 thinking::='<think>' #ex'</think>' '</think>' ws;
-content::=tool_call | text_response;
-tool_call::=#ex'<tool_call>' '<tool_call>' ws tool_json ws '</tool_call>';
-text_response::=#'.*' terminator;
-tool_json::='{' ws '"name"' ws ':' ws string ws ',' ws '"arguments"' ws ':' ws json_object ws '}';
+content::=function_calls | text_response;
+function_calls::=#ex'<ai00:function_calls>' '<ai00:function_calls>\n' invokes '</ai00:function_calls>';
+invokes::=invoke*;
+invoke::='  <invoke name="' tool_name '">\n' params '  </invoke>\n';
+params::=param*;
+param::='    <parameter name="' param_name '">' param_value '</parameter>\n';
+tool_name::=#'[a-zA-Z0-9_-]+';
+param_name::=#'[a-zA-Z0-9_]+';
+param_value::=#ex'</parameter>';
+text_response::=#ex'<ai00:function_calls>' #'[\\s\\S]*' terminator;
 "#;
 
 /// Thinking wrapper for user-provided grammars.
@@ -194,15 +221,20 @@ mod tests {
         assert!(GRAMMAR_UNIFIED.contains("<think>"));
         assert!(GRAMMAR_UNIFIED.contains("</think>"));
 
-        // Should support tool calls
-        assert!(GRAMMAR_UNIFIED.contains("tool_call"));
-        assert!(GRAMMAR_UNIFIED.contains("<tool_call>"));
-        assert!(GRAMMAR_UNIFIED.contains("</tool_call>"));
+        // Should support function calls (ai00 XML format)
+        assert!(GRAMMAR_UNIFIED.contains("function_calls"));
+        assert!(GRAMMAR_UNIFIED.contains("<ai00:function_calls>"));
+        assert!(GRAMMAR_UNIFIED.contains("</ai00:function_calls>"));
 
-        // Should have tool JSON structure
-        assert!(GRAMMAR_UNIFIED.contains("tool_json"));
-        assert!(GRAMMAR_UNIFIED.contains(r#"'"name"'"#));
-        assert!(GRAMMAR_UNIFIED.contains(r#"'"arguments"'"#));
+        // Should have invoke structure
+        assert!(GRAMMAR_UNIFIED.contains("invoke"));
+        assert!(GRAMMAR_UNIFIED.contains("<invoke name="));
+        assert!(GRAMMAR_UNIFIED.contains("</invoke>"));
+
+        // Should have parameter structure
+        assert!(GRAMMAR_UNIFIED.contains("param"));
+        assert!(GRAMMAR_UNIFIED.contains("<parameter name="));
+        assert!(GRAMMAR_UNIFIED.contains("</parameter>"));
 
         // Should have text response with terminator
         assert!(GRAMMAR_UNIFIED.contains("text_response"));
@@ -215,15 +247,17 @@ mod tests {
     #[test]
     fn test_grammar_unified_uses_complement_regex() {
         // The unified grammar should use #ex for matching text before tags
-        // This allows < characters in text (e.g., "2 < 3")
+        // This allows < characters in text (e.g., "2 < 3") and in parameter values
         assert!(GRAMMAR_UNIFIED.contains("#ex'</think>'"));
-        assert!(GRAMMAR_UNIFIED.contains("#ex'<tool_call>'"));
+        assert!(GRAMMAR_UNIFIED.contains("#ex'<ai00:function_calls>'"));
+        // param_value uses #ex'</parameter>' to allow < in values
+        assert!(GRAMMAR_UNIFIED.contains("param_value::=#ex'</parameter>'"));
     }
 
     #[test]
     fn test_build_structural_grammar_unified() {
         // All parameter combinations should produce the same unified grammar
-        let stop_seqs = vec!["\n\n".to_string()];
+        let stop_seqs = vec!["</ai00:assistant>".to_string()];
 
         let grammar_tt = build_structural_grammar(true, true, &stop_seqs);
         let grammar_tf = build_structural_grammar(true, false, &stop_seqs);
@@ -234,7 +268,7 @@ mod tests {
         for grammar in [&grammar_tt, &grammar_tf, &grammar_ft, &grammar_ff] {
             assert!(grammar.contains("json_object")); // From primitives
             assert!(grammar.contains("<think>")); // Always in unified
-            assert!(grammar.contains("<tool_call>")); // Always in unified
+            assert!(grammar.contains("<ai00:function_calls>")); // ai00 format
             assert!(grammar.contains("terminator::=")); // From stop sequences
         }
     }
