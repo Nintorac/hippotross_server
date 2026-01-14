@@ -238,28 +238,30 @@ pub struct PromptsConfig {
     #[derivative(Default(value = "String::from(\" think a lot\")"))]
     pub thinking_suffix_extended: String,
 
-    /// Role name for user messages in prompt.
-    #[derivative(Default(value = "String::from(\"User\")"))]
+    /// Role name for user messages in prompt (used in ai00 XML tags).
+    #[derivative(Default(value = "String::from(\"user\")"))]
     pub role_user: String,
 
-    /// Role name for assistant messages in prompt.
-    #[derivative(Default(value = "String::from(\"Assistant\")"))]
+    /// Role name for assistant messages in prompt (used in ai00 XML tags).
+    #[derivative(Default(value = "String::from(\"assistant\")"))]
     pub role_assistant: String,
 
-    /// Role name for system messages in prompt.
-    #[derivative(Default(value = "String::from(\"System\")"))]
+    /// Role name for system messages in prompt (used in ai00 XML tags).
+    #[derivative(Default(value = "String::from(\"system\")"))]
     pub role_system: String,
 
     /// Prefix added before assistant generation (normal mode).
-    #[derivative(Default(value = "String::from(\"Assistant:\")"))]
+    /// Opens the assistant turn with XML tag.
+    #[derivative(Default(value = "String::from(\"<ai00:assistant>\\n\")"))]
     pub assistant_prefix: String,
 
     /// Prefix added before assistant generation (thinking mode).
-    /// Note: Do NOT close the <think bracket - model continues from there.
-    #[derivative(Default(value = "String::from(\"Assistant: <think\")"))]
+    /// Opens the assistant turn and starts thinking block.
+    #[derivative(Default(value = "String::from(\"<ai00:assistant>\\n<think>\\n\")"))]
     pub assistant_prefix_thinking: String,
 
     /// Default stop sequences (when not provided in request).
-    #[derivative(Default(value = "vec![String::from(\"\\n\\nUser:\")]"))]
+    /// With ai00 XML format, assistant turn ends with closing tag.
+    #[derivative(Default(value = "vec![String::from(\"</ai00:assistant>\")]"))]
     pub default_stop_sequences: Vec<String>,
 }
