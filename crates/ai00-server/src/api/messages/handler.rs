@@ -14,7 +14,7 @@ use super::streaming::*;
 use super::thinking_extractor::{
     generate_thinking_signature, ThinkingExtractor, ThinkingStreamParser,
 };
-use super::tool_parser::ToolParser;
+use super::tool_parser::Ai00FunctionCallsParser;
 use super::types::{
     BnfValidationLevel, ContentBlock, MessageRole, MessagesRequest, MessagesResponse, StopReason,
 };
@@ -366,7 +366,7 @@ async fn respond_one(
 
     let (content, stop_reason) = if has_tools {
         // Parse the output for tool_call blocks
-        let mut parser = ToolParser::new();
+        let mut parser = Ai00FunctionCallsParser::new();
         let result = parser.feed(&text_for_parsing);
         let final_result = parser.finalize();
 
@@ -522,7 +522,7 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
             .await;
         }
         (false, true) => {
-            // Tool-aware streaming with ToolParser
+            // Tool-aware streaming with Ai00FunctionCallsParser
             respond_stream_with_tools(
                 res,
                 token_receiver,
@@ -961,7 +961,7 @@ async fn respond_stream_with_tools(
 
     // Shared state for the streaming handler
     struct StreamState {
-        parser: ToolParser,
+        parser: Ai00FunctionCallsParser,
         output_tokens: usize,
         content_block_index: usize,
         text_block_started: bool,
@@ -970,7 +970,7 @@ async fn respond_stream_with_tools(
     }
 
     let state = RefCell::new(StreamState {
-        parser: ToolParser::new(),
+        parser: Ai00FunctionCallsParser::new(),
         output_tokens: 0,
         content_block_index: 0,
         text_block_started: false,
