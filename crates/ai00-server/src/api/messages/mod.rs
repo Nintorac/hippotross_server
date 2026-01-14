@@ -18,5 +18,5 @@ pub use thinking_extractor::{
     generate_thinking_signature, ThinkingExtractor, ThinkingResult, ThinkingStreamParser,
     ThinkingStreamResult, ThinkingStreamState,
 };
-pub use tool_parser::{ParseResult, ParsedToolUse, ToolParser};
+pub use tool_parser::{Ai00FunctionCallsParser, ParseResult, ParsedToolUse, ToolParser};
 pub use types::*;
