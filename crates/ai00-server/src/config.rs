@@ -4,7 +4,7 @@ use std::{
 };
 
 use ai00_core::{
-    reload::{AdapterOption, Backend, BnfOption, Lora, Model, State, Tokenizer},
+    reload::{AdapterOption, BnfOption, Lora, Model, State, Tokenizer},
     ReloadRequest,
 };
 use derivative::Derivative;

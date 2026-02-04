@@ -7,7 +7,7 @@ use std::{
 
 use ai00_core::ThreadRequest;
 use anyhow::{anyhow, bail, Result};
-use clap::{command, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use memmap2::Mmap;
 use salvo::{
     affix_state,
