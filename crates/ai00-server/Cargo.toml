@@ -46,12 +46,12 @@ web-rwkv.workspace = true
 
 [dependencies.fastembed]
 optional = true
-version = "=4.4.0"
+version = "4"
 
 [target.'cfg(windows)'.dependencies.fastembed]
 features = ["ort-load-dynamic"]
 optional = true
-version = "=4.4.0"
+version = "4"
 
 [dependencies.hf-hub]
 optional = true

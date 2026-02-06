@@ -138,6 +138,10 @@ pub enum EmbeddingModel {
     ClipVitB32,
     /// jinaai/jina-embeddings-v2-base-code
     JinaEmbeddingsV2BaseCode,
+    /// BAAI/bge-large-zh-v1.5
+    BGELargeZHV15,
+    /// lightonai/modernbert-embed-large
+    ModernBertEmbedLarge,
 }
 
 #[cfg(feature = "embed")]

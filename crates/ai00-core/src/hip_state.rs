@@ -25,7 +25,9 @@ use hip_rwkv::hip::{HipRuntime, HipState, PinnedBuffer, Rwkv7ModelInfo, StateLay
 use web_rwkv::runtime::model::{AsAny, State};
 use web_rwkv::tensor::kind::ReadWrite;
 use web_rwkv::tensor::shape::Shape;
-use web_rwkv::tensor::{TensorCpu, TensorError, TensorErrorKind, TensorGpu, TensorGpuView, TensorInit, TensorShape};
+use web_rwkv::tensor::{
+    TensorCpu, TensorError, TensorErrorKind, TensorGpu, TensorGpuView, TensorInit, TensorShape,
+};
 
 /// Adapter implementing `web_rwkv::runtime::model::State` for the HIP backend.
 ///

@@ -425,10 +425,11 @@ impl CoreRuntime {
                 let prefab = cbor4ii::serde::from_slice::<InitState>(&data);
                 let state = match (st, prefab) {
                     (Ok(model), _) => {
-                        let context = self
-                            .context
-                            .as_ref()
-                            .ok_or_else(|| anyhow::anyhow!("loading state files from SafeTensors requires a WebGPU context"))?;
+                        let context = self.context.as_ref().ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "loading state files from SafeTensors requires a WebGPU context"
+                            )
+                        })?;
                         let data = load_model_state(context, &self.info, model).await?;
                         InitState {
                             name,
@@ -1192,8 +1193,7 @@ async fn softmax(
             batches.push(batch);
         }
 
-        let input: Vec<TensorCpu<f32>> =
-            batches.iter().map(|batch| batch.input.clone()).collect();
+        let input: Vec<TensorCpu<f32>> = batches.iter().map(|batch| batch.input.clone()).collect();
 
         let output = match &backend {
             SoftmaxBackend::WebGpu(context) => {

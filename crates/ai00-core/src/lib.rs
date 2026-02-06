@@ -646,7 +646,10 @@ async fn load_runtime_hip(
     let hip_model = tokio::task::spawn_blocking(move || {
         log::info!("[hip] spawn_blocking: calling Rwkv7Hip::load...");
         let result = hip_rwkv::hip::Rwkv7Hip::load(&model_path);
-        log::info!("[hip] spawn_blocking: Rwkv7Hip::load returned {:?}", result.is_ok());
+        log::info!(
+            "[hip] spawn_blocking: Rwkv7Hip::load returned {:?}",
+            result.is_ok()
+        );
         result
     })
     .await?
@@ -667,7 +670,11 @@ async fn load_runtime_hip(
     // (that requires a wgpu Context). Return empty states list.
     let states = Vec::new();
 
-    log::info!("HIP runtime created: max_batch={}, chunk_size={}", max_batch, token_chunk_size);
+    log::info!(
+        "HIP runtime created: max_batch={}, chunk_size={}",
+        max_batch,
+        token_chunk_size
+    );
 
     Ok((states, runtime, state))
 }
@@ -716,9 +723,15 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 log::info!("[reload] env write lock acquired, clearing env...");
                 let _ = std::mem::take(&mut *env);
 
-                log::info!("[reload] loading tokenizer from {:?}...", &request.tokenizer_path);
+                log::info!(
+                    "[reload] loading tokenizer from {:?}...",
+                    &request.tokenizer_path
+                );
                 let tokenizer = Arc::new(load_tokenizer(&request.tokenizer_path).await?);
-                log::info!("[reload] tokenizer loaded, dispatching backend {:?}...", request.backend);
+                log::info!(
+                    "[reload] tokenizer loaded, dispatching backend {:?}...",
+                    request.backend
+                );
 
                 // Dispatch based on backend selection
                 let (states, runtime, state, model, softmax_backend) = match request.backend {
@@ -734,8 +747,7 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                     #[cfg(feature = "hip")]
                     Backend::Hip => {
                         log::info!("loading model with HIP backend");
-                        let (states, runtime, state) =
-                            load_runtime_hip(&info, &request).await?;
+                        let (states, runtime, state) = load_runtime_hip(&info, &request).await?;
                         let softmax_backend = crate::run::SoftmaxBackend::Hip;
                         // HIP backend does not support model serialization (Save)
                         (states, runtime, state, None, softmax_backend)
@@ -795,7 +807,9 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                     match handle.await {
                         Ok(Ok(())) => log::info!("[reload] background load completed successfully"),
                         Ok(Err(err)) => log::error!("[reload] background load FAILED: {err:#?}"),
-                        Err(join_err) => log::error!("[reload] background task panicked: {join_err:#?}"),
+                        Err(join_err) => {
+                            log::error!("[reload] background task panicked: {join_err:#?}")
+                        }
                     }
                 });
             }
