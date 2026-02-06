@@ -2,7 +2,7 @@
 backend = "Hip"
 max_batch = 4
 name = "rwkv7-g1a-0.1b-20250728-ctx4096.st"
-path = "/workspace/models"
+path = "assets/models"
 token_chunk_size = 128
 stop = ["\n\n"]
 

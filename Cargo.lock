@@ -132,6 +132,7 @@ dependencies = [
  "log",
  "memmap2",
  "regex",
+ "reqwest",
  "safetensors",
  "salvo",
  "serde",
