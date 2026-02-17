@@ -8,7 +8,7 @@
 //! Run with: cargo test --test bnf_integration_test -- --nocapture
 
 use ai00_core::{
-    reload::{AdapterOption, BnfOption, Precision},
+    reload::{AdapterOption, Backend, BnfOption, Precision},
     GenerateRequest, ReloadRequest, ThreadRequest, Token,
 };
 use ai00_server::api::messages::{
@@ -144,6 +144,7 @@ async fn setup_model_internal() -> (Sender<ThreadRequest>, Arc<Tokenizer>) {
             start_nonterminal: "start".to_string(),
         },
         adapter: AdapterOption::Auto,
+        backend: Backend::WebGpu,
     };
 
     // Send reload request and wait for completion
