@@ -2,6 +2,8 @@
 //!
 //! Provides mock ThreadSender that responds with predetermined tokens.
 
+#![allow(dead_code)]
+
 use ai00_core::{FinishReason, ThreadRequest, Token, TokenCounter};
 use flume::Sender;
 use std::time::Duration;

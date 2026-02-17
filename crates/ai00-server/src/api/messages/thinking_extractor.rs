@@ -474,7 +474,7 @@ mod tests {
         let mut parser = ThinkingStreamParser::new();
 
         // Feed content that ends with partial tag
-        let r1 = parser.feed("thinking</thi");
+        let _r1 = parser.feed("thinking</thi");
         // Should buffer the partial tag
         assert_eq!(parser.state(), ThinkingStreamState::InsideThinking);
 
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(parser.state(), ThinkingStreamState::DetectingThinking);
 
         // Feed opening tag and thinking content
-        let r1 = parser.feed("<think>reasoning here");
+        let _r1 = parser.feed("<think>reasoning here");
         assert_eq!(parser.state(), ThinkingStreamState::InsideThinking);
 
         // Feed closing tag and response
@@ -560,12 +560,12 @@ mod tests {
         let mut parser = ThinkingStreamParser::new_detecting();
 
         // Feed partial <think> tag
-        let r1 = parser.feed("text<thi");
+        let _r1 = parser.feed("text<thi");
         // Should emit text before potential tag, buffer the partial tag
         assert_eq!(parser.state(), ThinkingStreamState::DetectingThinking);
 
         // Complete the tag
-        let r2 = parser.feed("nk>inside thinking");
+        let _r2 = parser.feed("nk>inside thinking");
         assert_eq!(parser.state(), ThinkingStreamState::InsideThinking);
     }
 
