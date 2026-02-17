@@ -332,7 +332,10 @@ greeting::='Hello' | 'Hi';"#;
             );
 
             // Rules should end with semicolons
-            assert!(grammar.contains(';'), "Grammar rules must end with semicolons");
+            assert!(
+                grammar.contains(';'),
+                "Grammar rules must end with semicolons"
+            );
 
             // Check balanced quotes in literals
             let double_quote_count = grammar.chars().filter(|c| *c == '"').count();

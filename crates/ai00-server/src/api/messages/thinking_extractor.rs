@@ -196,7 +196,8 @@ impl ThinkingStreamParser {
                     // (handles case where entire thinking block is in one token)
                     if let Some(end_pos) = self.buffer.find(self.think_end) {
                         let thinking_content = self.buffer[..end_pos].to_string();
-                        let text_after_tag = self.buffer[end_pos + self.think_end.len()..].to_string();
+                        let text_after_tag =
+                            self.buffer[end_pos + self.think_end.len()..].to_string();
 
                         self.thinking_content.push_str(&thinking_content);
                         self.buffer.clear();
@@ -407,7 +408,8 @@ mod tests {
     #[test]
     fn test_extract_with_multiline_thinking() {
         let extractor = ThinkingExtractor::new();
-        let input = "<think>\nFirst thought.\nSecond thought.\nThird thought.\n</think>\n\nFinal answer.";
+        let input =
+            "<think>\nFirst thought.\nSecond thought.\nThird thought.\n</think>\n\nFinal answer.";
         let result = extractor.extract(input);
 
         assert!(result.has_thinking);

@@ -155,11 +155,7 @@ pub fn emit_content_block_start_text(index: usize) -> SseEvent {
 }
 
 /// Create a content_block_start SSE event for tool_use.
-pub fn emit_content_block_start_tool_use(
-    index: usize,
-    id: String,
-    name: String,
-) -> SseEvent {
+pub fn emit_content_block_start_tool_use(index: usize, id: String, name: String) -> SseEvent {
     let event = ContentBlockStartEvent {
         event_type: "content_block_start",
         index,
@@ -275,9 +271,7 @@ pub fn emit_message_stop() -> SseEvent {
 
 /// Create a ping SSE event for keep-alive.
 pub fn emit_ping() -> SseEvent {
-    let event = PingEvent {
-        event_type: "ping",
-    };
+    let event = PingEvent { event_type: "ping" };
     SseEvent::default()
         .name("ping")
         .text(serde_json::to_string(&event).unwrap())
@@ -305,7 +299,11 @@ pub struct StreamErrorData {
 }
 
 /// Create an error SSE event with optional partial content.
-pub fn emit_error(error_type: &str, message: &str, partial_content: Option<Vec<ContentBlock>>) -> SseEvent {
+pub fn emit_error(
+    error_type: &str,
+    message: &str,
+    partial_content: Option<Vec<ContentBlock>>,
+) -> SseEvent {
     let event = StreamErrorEvent {
         event_type: "error",
         error: StreamErrorData {

@@ -761,7 +761,10 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
 
                 tracing::info!(event = "env_lock", "Acquiring env write lock...");
                 let mut env = env.write().await;
-                tracing::info!(event = "env_lock_acquired", "Env write lock acquired, clearing env...");
+                tracing::info!(
+                    event = "env_lock_acquired",
+                    "Env write lock acquired, clearing env..."
+                );
                 let _ = std::mem::take(&mut *env);
 
                 tracing::info!(
@@ -863,8 +866,12 @@ async fn process(env: Arc<RwLock<Environment>>, request: ThreadRequest) -> Resul
                 // Fire-and-forget initial load: log errors from the background task
                 tokio::spawn(async move {
                     match handle.await {
-                        Ok(Ok(())) => tracing::info!("[reload] background load completed successfully"),
-                        Ok(Err(err)) => tracing::error!("[reload] background load FAILED: {err:#?}"),
+                        Ok(Ok(())) => {
+                            tracing::info!("[reload] background load completed successfully")
+                        }
+                        Ok(Err(err)) => {
+                            tracing::error!("[reload] background load FAILED: {err:#?}")
+                        }
                         Err(join_err) => {
                             tracing::error!("[reload] background task panicked: {join_err:#?}")
                         }

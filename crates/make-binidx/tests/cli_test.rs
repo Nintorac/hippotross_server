@@ -94,15 +94,30 @@ fn test_text_only_from_file() {
     );
 
     // Check output contains expected content (uses ai00 XML format)
-    assert!(stdout.contains("<ai00:system>"), "Missing system opening tag");
-    assert!(stdout.contains("You are helpful."), "Missing system content");
-    assert!(stdout.contains("</ai00:system>"), "Missing system closing tag");
+    assert!(
+        stdout.contains("<ai00:system>"),
+        "Missing system opening tag"
+    );
+    assert!(
+        stdout.contains("You are helpful."),
+        "Missing system content"
+    );
+    assert!(
+        stdout.contains("</ai00:system>"),
+        "Missing system closing tag"
+    );
     assert!(stdout.contains("<ai00:user>"), "Missing user opening tag");
     assert!(stdout.contains("Hi"), "Missing user message");
     assert!(stdout.contains("</ai00:user>"), "Missing user closing tag");
-    assert!(stdout.contains("<ai00:assistant>"), "Missing assistant opening tag");
+    assert!(
+        stdout.contains("<ai00:assistant>"),
+        "Missing assistant opening tag"
+    );
     assert!(stdout.contains("Hello!"), "Missing assistant response");
-    assert!(stdout.contains("</ai00:assistant>"), "Missing assistant closing tag");
+    assert!(
+        stdout.contains("</ai00:assistant>"),
+        "Missing assistant closing tag"
+    );
     assert!(stdout.contains("---"), "Missing separator between prompts");
     // Training prompts should NOT have trailing assistant prefix
     assert!(
@@ -116,7 +131,8 @@ fn test_text_only_from_stdin() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = create_test_config(&temp_dir);
 
-    let jsonl_data = r#"{"model":"rwkv","messages":[{"role":"user","content":"Stdin test"}],"max_tokens":100}"#;
+    let jsonl_data =
+        r#"{"model":"rwkv","messages":[{"role":"user","content":"Stdin test"}],"max_tokens":100}"#;
 
     let mut child = Command::new(binary_path())
         .args([
@@ -184,7 +200,10 @@ fn test_binidx_from_file() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(output.status.success(), "Command failed: {}", stderr);
-    assert!(stderr.contains("Documents:    2"), "Should have 2 documents");
+    assert!(
+        stderr.contains("Documents:    2"),
+        "Should have 2 documents"
+    );
 
     // Verify output files exist
     let bin_path = output_path.with_extension("bin");

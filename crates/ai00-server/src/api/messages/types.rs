@@ -133,9 +133,9 @@ impl MessageContent {
             MessageContent::Text(_) => false,
             MessageContent::Blocks(blocks) => {
                 !blocks.is_empty()
-                    && blocks.iter().all(|b| {
-                        matches!(b, ContentBlock::ToolResult { .. })
-                    })
+                    && blocks
+                        .iter()
+                        .all(|b| matches!(b, ContentBlock::ToolResult { .. }))
             }
         }
     }
@@ -212,23 +212,23 @@ fn format_tool_result_as_ai00(
     let result_text = content.to_text();
 
     // Try to pretty-print if valid JSON, otherwise use raw text
-    let formatted_content = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&result_text)
-    {
-        // Pretty-print with 4-space indent
-        if let Ok(pretty) = serde_json::to_string_pretty(&json) {
-            let mut indented = String::new();
-            for line in pretty.lines() {
-                indented.push_str("    ");
-                indented.push_str(line);
-                indented.push('\n');
+    let formatted_content =
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&result_text) {
+            // Pretty-print with 4-space indent
+            if let Ok(pretty) = serde_json::to_string_pretty(&json) {
+                let mut indented = String::new();
+                for line in pretty.lines() {
+                    indented.push_str("    ");
+                    indented.push_str(line);
+                    indented.push('\n');
+                }
+                indented.trim_end().to_string()
+            } else {
+                format!("    {}", result_text)
             }
-            indented.trim_end().to_string()
         } else {
             format!("    {}", result_text)
-        }
-    } else {
-        format!("    {}", result_text)
-    };
+        };
 
     // Extract tool name from tool_use_id (format: toolu_XXXX -> use as identifier)
     // In real usage, the handler should look up the actual tool name
@@ -338,7 +338,6 @@ impl Tool {
         }
         Ok(())
     }
-
 }
 
 /// Generate a system prompt section describing available tools (ai00 XML format).

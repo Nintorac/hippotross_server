@@ -176,7 +176,9 @@ fn demo_prompt_output() {
         },
     ];
 
-    let thinking = ThinkingConfig::Enabled { budget_tokens: 5000 };
+    let thinking = ThinkingConfig::Enabled {
+        budget_tokens: 5000,
+    };
 
     let prompt = build_prompt(
         Some("You are a helpful weather assistant."),
@@ -186,7 +188,10 @@ fn demo_prompt_output() {
         &prompts,
     );
 
-    println!("\n\n=== GENERATED PROMPT ===\n{}\n=== END PROMPT ===\n\n", prompt);
+    println!(
+        "\n\n=== GENERATED PROMPT ===\n{}\n=== END PROMPT ===\n\n",
+        prompt
+    );
 
     // Write to file for inspection
     std::fs::write("/tmp/ai00_prompt_output.txt", &prompt).unwrap();

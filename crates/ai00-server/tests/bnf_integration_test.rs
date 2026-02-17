@@ -124,9 +124,11 @@ async fn setup_model_internal() -> (Sender<ThreadRequest>, Arc<Tokenizer>) {
     GLOBAL_RUNTIME.spawn(ai00_core::serve(receiver));
 
     // Load the tokenizer
-    let tokenizer_contents =
-        tokio::fs::read_to_string(tokenizer_path()).await.expect("Failed to read tokenizer");
-    let tokenizer = Arc::new(Tokenizer::new(&tokenizer_contents).expect("Failed to parse tokenizer"));
+    let tokenizer_contents = tokio::fs::read_to_string(tokenizer_path())
+        .await
+        .expect("Failed to read tokenizer");
+    let tokenizer =
+        Arc::new(Tokenizer::new(&tokenizer_contents).expect("Failed to parse tokenizer"));
 
     // Create reload request
     let reload_request = ReloadRequest {
@@ -184,7 +186,9 @@ async fn generate_with_bnf(
         stop: vec![],
         bias: Arc::new(HashMap::new()),
         bnf_schema,
-        sampler: Arc::new(RwLock::new(ai00_core::sampler::nucleus::NucleusSampler::default())),
+        sampler: Arc::new(RwLock::new(
+            ai00_core::sampler::nucleus::NucleusSampler::default(),
+        )),
         kind: ai00_core::GenerateKind::None,
         state: Default::default(),
         request_id: None,
@@ -232,7 +236,11 @@ fn test_bnf_sampler_compiles_simple_grammar() {
     let grammar = r#"start::='yes' | 'no';"#;
 
     let result = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, grammar);
-    assert!(result.is_ok(), "BnfSampler should compile simple grammar: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "BnfSampler should compile simple grammar: {:?}",
+        result.err()
+    );
 }
 
 /// Test BnfSampler compiles the unified grammar.
@@ -243,7 +251,11 @@ fn test_bnf_sampler_compiles_unified_grammar() {
     let grammar = build_structural_grammar(false, false, &stop_seqs);
 
     let result = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, &grammar);
-    assert!(result.is_ok(), "BnfSampler should compile unified grammar: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "BnfSampler should compile unified grammar: {:?}",
+        result.err()
+    );
 }
 
 /// Test BnfSampler compiles unified grammar with all stop sequence variants.
@@ -254,7 +266,11 @@ fn test_bnf_sampler_compiles_unified_grammar_with_stop_sequences() {
     let grammar = build_structural_grammar(true, true, &stop_seqs);
 
     let result = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, &grammar);
-    assert!(result.is_ok(), "BnfSampler should compile unified grammar with stop sequences: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "BnfSampler should compile unified grammar with stop sequences: {:?}",
+        result.err()
+    );
 }
 
 /// Test GRAMMAR_UNIFIED constant compiles directly.
@@ -262,10 +278,17 @@ fn test_bnf_sampler_compiles_unified_grammar_with_stop_sequences() {
 fn test_bnf_sampler_compiles_grammar_unified_constant() {
     let tokenizer = load_tokenizer();
     // Add terminator rule manually since GRAMMAR_UNIFIED doesn't include it
-    let grammar = format!("{}\n{}\nterminator::='\\n\\n';", GRAMMAR_JSON_PRIMITIVES, GRAMMAR_UNIFIED);
+    let grammar = format!(
+        "{}\n{}\nterminator::='\\n\\n';",
+        GRAMMAR_JSON_PRIMITIVES, GRAMMAR_UNIFIED
+    );
 
     let result = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, &grammar);
-    assert!(result.is_ok(), "BnfSampler should compile GRAMMAR_UNIFIED: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "BnfSampler should compile GRAMMAR_UNIFIED: {:?}",
+        result.err()
+    );
 }
 
 /// Test BnfSampler compiles schema-aware grammar with tools.
@@ -307,7 +330,11 @@ fn test_bnf_sampler_compiles_wrapped_grammar() {
     let grammar = format!("{}\n{}", GRAMMAR_JSON_PRIMITIVES, wrapped);
 
     let result = ai00_core::sampler::bnf::BnfSampler::new(&tokenizer, &grammar);
-    assert!(result.is_ok(), "BnfSampler should compile wrapped grammar: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "BnfSampler should compile wrapped grammar: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -388,7 +415,10 @@ fn test_bnf_sampler_allows_valid_tokens() {
 
     // At least one H token should be allowed
     let h_allowed = h_tokens.iter().any(|&i| logits[i] != f32::NEG_INFINITY);
-    assert!(h_allowed, "Token starting with 'H' should be allowed as it starts both 'Hello' and 'Hi'");
+    assert!(
+        h_allowed,
+        "Token starting with 'H' should be allowed as it starts both 'Hello' and 'Hi'"
+    );
 }
 
 // ============================================================================
@@ -433,22 +463,24 @@ fn test_tools_grammar_allows_text_only_output() {
 
     // Find tokens that are plain text (not starting with '<')
     let text_tokens_allowed: Vec<(usize, String)> = (0..vocab_size)
-        .filter(|&i| {
-            logits[i] != f32::NEG_INFINITY
-                && !vocab[i].is_empty()
-                && vocab[i][0] != b'<'
-        })
+        .filter(|&i| logits[i] != f32::NEG_INFINITY && !vocab[i].is_empty() && vocab[i][0] != b'<')
         .take(10)
         .map(|i| (i, String::from_utf8_lossy(&vocab[i]).to_string()))
         .collect();
 
-    println!("Text tokens (not '<') allowed at start: {:?}", text_tokens_allowed);
+    println!(
+        "Text tokens (not '<') allowed at start: {:?}",
+        text_tokens_allowed
+    );
 
     // Check specifically for "Hello" token (33155 from the other test)
     let hello_token = 33155usize;
     if hello_token < vocab_size {
         let hello_allowed = logits[hello_token] != f32::NEG_INFINITY;
-        println!("Token 33155 ('Hello') allowed: {}, logit: {}", hello_allowed, logits[hello_token]);
+        println!(
+            "Token 33155 ('Hello') allowed: {}, logit: {}",
+            hello_allowed, logits[hello_token]
+        );
     }
 
     // Find if '<' tokens are allowed (for tool_call)
@@ -484,7 +516,9 @@ fn test_tools_grammar_accepts_hello_world() {
 
     // Tokenize "Hello" - a simple text without tool calls
     let text = "Hello";
-    let tokens = tokenizer.encode(text.as_bytes()).expect("Should tokenize 'Hello'");
+    let tokens = tokenizer
+        .encode(text.as_bytes())
+        .expect("Should tokenize 'Hello'");
 
     println!("Tokens for '{}': {:?}", text, tokens);
 
@@ -494,9 +528,13 @@ fn test_tools_grammar_accepts_hello_world() {
     for (i, &token) in tokens.iter().enumerate() {
         let token_id = token as usize;
         let finished = sampler.update(token as u32);
-        println!("Token {}: {} (id={}) -> finished={}", i,
+        println!(
+            "Token {}: {} (id={}) -> finished={}",
+            i,
             String::from_utf8_lossy(&vocab[token_id]),
-            token, finished);
+            token,
+            finished
+        );
 
         if finished && i < tokens.len() - 1 {
             println!("Sampler finished early at token {}", i);
@@ -529,7 +567,9 @@ fn test_tools_grammar_allows_multi_token_text() {
 
     // Tokenize a longer sentence
     let text = "The capital of Italy is Rome.";
-    let tokens = tokenizer.encode(text.as_bytes()).expect("Should tokenize text");
+    let tokens = tokenizer
+        .encode(text.as_bytes())
+        .expect("Should tokenize text");
 
     println!("Tokens for '{}': {:?}", text, tokens);
     assert!(tokens.len() > 1, "Test requires multiple tokens");
@@ -546,8 +586,14 @@ fn test_tools_grammar_allows_multi_token_text() {
         let token_allowed = logits[token_id] != f32::NEG_INFINITY;
 
         let finished = sampler.update(token as u32);
-        println!("Token {}: {:?} (id={}) -> allowed={}, finished={}",
-            i, String::from_utf8_lossy(&vocab[token_id]), token, token_allowed, finished);
+        println!(
+            "Token {}: {:?} (id={}) -> allowed={}, finished={}",
+            i,
+            String::from_utf8_lossy(&vocab[token_id]),
+            token,
+            token_allowed,
+            finished
+        );
 
         if finished {
             finished_count += 1;
@@ -557,7 +603,9 @@ fn test_tools_grammar_allows_multi_token_text() {
         assert!(
             token_allowed,
             "Token {} ({:?}) should be allowed by grammar at position {}",
-            token, String::from_utf8_lossy(&vocab[token_id]), i
+            token,
+            String::from_utf8_lossy(&vocab[token_id]),
+            i
         );
     }
 
@@ -584,7 +632,14 @@ async fn test_model_generation_without_bnf() {
         return;
     };
 
-    let output = generate_with_bnf(&model.sender, &model.tokenizer, "Hello, my name is", None, 20).await;
+    let output = generate_with_bnf(
+        &model.sender,
+        &model.tokenizer,
+        "Hello, my name is",
+        None,
+        20,
+    )
+    .await;
 
     assert!(!output.is_empty(), "Model should generate some output");
     println!("Generated (no BNF): {}", output);
@@ -682,7 +737,10 @@ async fn test_model_generation_with_unified_bnf() {
 
     // The output might have thinking tags or just be plain text (both valid per grammar)
     // Just verify we got some output
-    assert!(!output.is_empty(), "Model should generate output with unified grammar");
+    assert!(
+        !output.is_empty(),
+        "Model should generate output with unified grammar"
+    );
 }
 
 /// Test that BNF constraint actually restricts output.
@@ -742,19 +800,44 @@ fn test_build_structural_grammar_unified_for_all_combinations() {
         let grammar = build_structural_grammar(thinking, tools, &stop_seqs);
 
         // Unified grammar always has start rule
-        assert!(grammar.contains("start::="), "Missing start rule for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("start::="),
+            "Missing start rule for ({}, {})",
+            thinking,
+            tools
+        );
 
         // Unified grammar always includes thinking (optional)
-        assert!(grammar.contains("<think>"), "Missing <think> for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("<think>"),
+            "Missing <think> for ({}, {})",
+            thinking,
+            tools
+        );
 
         // Unified grammar always includes function calls (ai00 XML format)
-        assert!(grammar.contains("<ai00:function_calls>"), "Missing <ai00:function_calls> for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("<ai00:function_calls>"),
+            "Missing <ai00:function_calls> for ({}, {})",
+            thinking,
+            tools
+        );
 
         // Unified grammar always has terminator
-        assert!(grammar.contains("terminator::="), "Missing terminator for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("terminator::="),
+            "Missing terminator for ({}, {})",
+            thinking,
+            tools
+        );
 
         // Unified grammar uses complement regex
-        assert!(grammar.contains("#ex'"), "Missing complement regex for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("#ex'"),
+            "Missing complement regex for ({}, {})",
+            thinking,
+            tools
+        );
     }
 }
 
@@ -841,11 +924,11 @@ fn test_generate_schema_aware_grammar_integration() {
     // Unified grammar always includes thinking (optional)
     let grammar = generate_schema_aware_grammar(&tools);
     assert!(grammar.contains("start::="));
-    assert!(grammar.contains("<think>"));  // Always present in unified grammar
-    assert!(grammar.contains("<ai00:function_calls>"));  // ai00 XML format
-    assert!(grammar.contains("echo_call"));  // Tool-specific rule
-    assert!(grammar.contains("echo_input"));  // Tool-specific input rule
-    // Uses complement regex
+    assert!(grammar.contains("<think>")); // Always present in unified grammar
+    assert!(grammar.contains("<ai00:function_calls>")); // ai00 XML format
+    assert!(grammar.contains("echo_call")); // Tool-specific rule
+    assert!(grammar.contains("echo_input")); // Tool-specific input rule
+                                             // Uses complement regex
     assert!(grammar.contains("#ex'"));
 }
 
@@ -932,7 +1015,10 @@ async fn test_model_generates_tool_call_tags() {
 #[tokio::test]
 async fn test_tool_parser_parses_model_output() {
     if !model_supports_tool_calling() {
-        eprintln!("Model {:?} doesn't support tool calling, skipping.", model_path());
+        eprintln!(
+            "Model {:?} doesn't support tool calling, skipping.",
+            model_path()
+        );
         return;
     }
     let Some(model) = get_shared_model().await else {
@@ -993,7 +1079,10 @@ async fn test_tool_parser_parses_model_output() {
 #[tokio::test]
 async fn test_model_tool_call_with_multiple_tools() {
     if !model_supports_tool_calling() {
-        eprintln!("Model {:?} doesn't support tool calling, skipping.", model_path());
+        eprintln!(
+            "Model {:?} doesn't support tool calling, skipping.",
+            model_path()
+        );
         return;
     }
     let Some(model) = get_shared_model().await else {
@@ -1048,7 +1137,10 @@ async fn test_model_tool_call_with_multiple_tools() {
 #[tokio::test]
 async fn test_tool_call_json_format() {
     if !model_supports_tool_calling() {
-        eprintln!("Model {:?} doesn't support tool calling, skipping.", model_path());
+        eprintln!(
+            "Model {:?} doesn't support tool calling, skipping.",
+            model_path()
+        );
         return;
     }
     let Some(model) = get_shared_model().await else {
@@ -1088,10 +1180,7 @@ async fn test_tool_call_json_format() {
 
         // Verify the JSON has the expected structure
         assert_eq!(tool.name, "calculate");
-        assert!(
-            tool.input.is_object(),
-            "Tool input should be a JSON object"
-        );
+        assert!(tool.input.is_object(), "Tool input should be a JSON object");
     } else {
         // If no tools parsed, check if the output has the right format at all
         if output.contains("<tool_call>") {
