@@ -226,7 +226,7 @@ async fn generate_with_bnf(
 fn test_tokenizer_loads() {
     let tokenizer = load_tokenizer();
     // Basic sanity check - tokenizer should have vocab
-    assert!(tokenizer.token_index_to_bytes().len() > 0);
+    assert!(!tokenizer.token_index_to_bytes().is_empty());
 }
 
 /// Test BnfSampler can be created with our grammars.
@@ -527,7 +527,7 @@ fn test_tools_grammar_accepts_hello_world() {
     let vocab = tokenizer.token_index_to_bytes();
     for (i, &token) in tokens.iter().enumerate() {
         let token_id = token as usize;
-        let finished = sampler.update(token as u32);
+        let finished = sampler.update(token);
         println!(
             "Token {}: {} (id={}) -> finished={}",
             i,
@@ -585,7 +585,7 @@ fn test_tools_grammar_allows_multi_token_text() {
         sampler.transform(&mut logits);
         let token_allowed = logits[token_id] != f32::NEG_INFINITY;
 
-        let finished = sampler.update(token as u32);
+        let finished = sampler.update(token);
         println!(
             "Token {}: {:?} (id={}) -> allowed={}, finished={}",
             i,

@@ -1199,7 +1199,7 @@ fn test_bnf_validation_level_serialization(
     #[case] level: BnfValidationLevel,
     #[case] expected: &str,
 ) {
-    let json = serde_json::to_value(&level).unwrap();
+    let json = serde_json::to_value(level).unwrap();
     assert_eq!(json, expected);
 }
 
@@ -2004,7 +2004,7 @@ Here are the results."#;
 
     // Should have text (after) and tool_use
     // Note: With current parser, text after might be captured
-    assert!(blocks.len() >= 1, "Should have at least tool_use block");
+    assert!(!blocks.is_empty(), "Should have at least tool_use block");
 
     // Find the tool_use block
     let tool_use = blocks

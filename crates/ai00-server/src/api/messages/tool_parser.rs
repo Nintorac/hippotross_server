@@ -553,9 +553,7 @@ impl Ai00FunctionCallsParser {
                     self.state = Ai00ParserState::InAttrName;
                 } else {
                     // Accumulate attribute value
-                    if self.tag_buffer == "invoke" {
-                        self.current_param_name.push(ch);
-                    } else if self.tag_buffer == "parameter" {
+                    if self.tag_buffer == "invoke" || self.tag_buffer == "parameter" {
                         self.current_param_name.push(ch);
                     }
                 }
@@ -794,7 +792,7 @@ mod ai00_parser_tests {
             r#"<ai00:function_calls>
   <invoke name="calc">
     <parameter name="x">42</parameter>
-    <parameter name="y">3.14</parameter>
+    <parameter name="y">2.5</parameter>
   </invoke>
 </ai00:function_calls>"#,
         );
@@ -803,7 +801,7 @@ mod ai00_parser_tests {
         let tool = &result.tool_uses[0];
         // Numbers should be parsed as JSON numbers
         assert_eq!(tool.input["x"], 42);
-        assert_eq!(tool.input["y"], 3.14);
+        assert_eq!(tool.input["y"], 2.5);
     }
 
     #[test]

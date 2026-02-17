@@ -53,12 +53,10 @@ impl ServerProcess {
 
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    eprintln!("[server] {}", line);
-                    if let Ok(mut log) = stderr_log_clone.lock() {
-                        log.push(line);
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                eprintln!("[server] {}", line);
+                if let Ok(mut log) = stderr_log_clone.lock() {
+                    log.push(line);
                 }
             }
         });
