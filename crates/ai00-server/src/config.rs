@@ -218,12 +218,16 @@ pub struct WebOption {
 pub struct PromptsConfig {
     /// Header for tool system prompt (before tool definitions).
     /// Use {tools_json} as placeholder for tool definitions.
-    #[derivative(Default(value = r#"String::from("\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n")"#))]
+    #[derivative(Default(
+        value = r#"String::from("\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n")"#
+    ))]
     pub tool_header: String,
 
     /// Footer/instructions for tool system prompt (after tool definitions).
     /// This instructs the model how to format tool calls.
-    #[derivative(Default(value = r#"String::from("</tools>\n\nIMPORTANT: To call a function, use EXACTLY this XML format:\n<tool_call>\n{\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n\nNEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.")"#))]
+    #[derivative(Default(
+        value = r#"String::from("</tools>\n\nIMPORTANT: To call a function, use EXACTLY this XML format:\n<tool_call>\n{\"name\": \"function_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n\nNEVER use <tool_use>. ALWAYS use <tool_call> with \"arguments\" field.")"#
+    ))]
     pub tool_footer: String,
 
     /// Suffix appended to user message for short thinking (tier 1: 1024-4095 tokens).

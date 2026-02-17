@@ -87,8 +87,7 @@ enum InputSource {
 fn create_reader(source: &InputSource) -> Result<Box<dyn BufRead>> {
     match source {
         InputSource::File(path) => {
-            let file =
-                File::open(path).with_context(|| format!("Failed to open {:?}", path))?;
+            let file = File::open(path).with_context(|| format!("Failed to open {:?}", path))?;
             Ok(Box::new(BufReader::new(file)))
         }
         InputSource::Stdin => Ok(Box::new(BufReader::new(io::stdin().lock()))),
@@ -272,14 +271,18 @@ fn run_binidx(args: &Args) -> Result<()> {
     eprintln!("\n=== Statistics ===");
     eprintln!("Documents:    {}", stats.num_documents);
     if skipped_count > 0 {
-        eprintln!("Skipped:      {} (exceeded --max-tokens {})", skipped_count, args.max_tokens.unwrap());
+        eprintln!(
+            "Skipped:      {} (exceeded --max-tokens {})",
+            skipped_count,
+            args.max_tokens.unwrap()
+        );
     }
-    eprintln!("Total tokens: {} (including EOS markers)", stats.total_tokens);
-    eprintln!("Prompt tokens: {} (before EOS)", total_prompt_tokens);
     eprintln!(
-        "Output files: {:?}.bin, {:?}.idx",
-        output_path, output_path
+        "Total tokens: {} (including EOS markers)",
+        stats.total_tokens
     );
+    eprintln!("Prompt tokens: {} (before EOS)", total_prompt_tokens);
+    eprintln!("Output files: {:?}.bin, {:?}.idx", output_path, output_path);
 
     // Print magic_prime calculation hint for RWKV trainer
     let data_len = stats.total_tokens;
@@ -288,10 +291,7 @@ fn run_binidx(args: &Args) -> Result<()> {
         let target = data_len / ctx_len - 1;
         eprintln!("\nFor RWKV trainer:");
         eprintln!("  --my_exit_tokens {}", stats.total_tokens);
-        eprintln!(
-            "  --magic_prime <largest 3n+2 prime less than {}>",
-            target
-        );
+        eprintln!("  --magic_prime <largest 3n+2 prime less than {}>", target);
     }
 
     Ok(())

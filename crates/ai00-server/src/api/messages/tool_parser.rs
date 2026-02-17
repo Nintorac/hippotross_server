@@ -345,7 +345,8 @@ mod tests {
         let result1 = parser.feed("First I'll search. ");
         assert_eq!(result1.text, Some("First I'll search. ".to_string()));
 
-        let result2 = parser.feed(r#"<tool_call>{"name": "search", "arguments": {"q": "test"}}</tool_call>"#);
+        let result2 =
+            parser.feed(r#"<tool_call>{"name": "search", "arguments": {"q": "test"}}</tool_call>"#);
         assert_eq!(result2.tool_uses.len(), 1);
 
         let result3 = parser.feed(" Then calculate. ");
@@ -610,7 +611,9 @@ impl Ai00FunctionCallsParser {
                 // Add parameter to current params
                 if !self.current_param_name.is_empty() {
                     let name = std::mem::take(&mut self.current_param_name);
-                    let value = std::mem::take(&mut self.current_param_value).trim().to_string();
+                    let value = std::mem::take(&mut self.current_param_value)
+                        .trim()
+                        .to_string();
 
                     // Try to parse value as JSON, otherwise use as string
                     let json_value = if let Ok(v) = serde_json::from_str::<Value>(&value) {
@@ -738,7 +741,10 @@ mod ai00_parser_tests {
         let mut parser = Ai00FunctionCallsParser::new();
 
         let result1 = parser.feed("Let me check that for you.\n");
-        assert_eq!(result1.text, Some("Let me check that for you.\n".to_string()));
+        assert_eq!(
+            result1.text,
+            Some("Let me check that for you.\n".to_string())
+        );
 
         let result2 = parser.feed(
             r#"<ai00:function_calls>

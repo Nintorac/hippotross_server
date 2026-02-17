@@ -114,7 +114,7 @@ fn build_prompt_inner(
         messages[from_idx + 1..]
             .iter()
             .find(|m| !(m.role == MessageRole::User && m.content.is_tool_result_only()))
-            .map(|m| m.role.clone())
+            .map(|m| m.role)
     };
 
     for (i, msg) in messages.iter().enumerate() {
@@ -149,13 +149,13 @@ fn build_prompt_inner(
             msg.role == MessageRole::Assistant && content.contains("<ai00:function_calls>");
 
         // Check if next message has same role (to decide whether to close turn)
-        let next_same_role = next_regular_msg_role(i) == Some(msg.role.clone());
+        let next_same_role = next_regular_msg_role(i) == Some(msg.role);
 
         // Determine if we need to close current turn and/or start new one
         match current_turn {
             Some(current_role) if current_role == msg.role => {
                 // Same role as current turn - append content (merge consecutive)
-                prompt.push_str("\n");
+                prompt.push('\n');
                 prompt.push_str(&content);
                 prompt.push_str(think_suffix);
 
@@ -185,7 +185,7 @@ fn build_prompt_inner(
 
                 // Start new turn
                 prompt.push_str(&format!("<ai00:{}>\n{}{}", role_str, content, think_suffix));
-                current_turn = Some(msg.role.clone());
+                current_turn = Some(msg.role);
 
                 if has_tool_use {
                     turn_has_tool_use = true;
@@ -203,7 +203,7 @@ fn build_prompt_inner(
             None => {
                 // No current turn - start new one
                 prompt.push_str(&format!("<ai00:{}>\n{}{}", role_str, content, think_suffix));
-                current_turn = Some(msg.role.clone());
+                current_turn = Some(msg.role);
 
                 if has_tool_use {
                     turn_has_tool_use = true;
@@ -255,9 +255,9 @@ pub fn get_thinking_suffix<'a>(
         Some(ThinkingConfig::Enabled { budget_tokens }) => {
             // Map budget to thinking intensity
             match *budget_tokens {
-                0..=4095 => &prompts.thinking_suffix_short,     // Tier 1: shorter thinking
+                0..=4095 => &prompts.thinking_suffix_short, // Tier 1: shorter thinking
                 4096..=16383 => &prompts.thinking_suffix_standard, // Tier 2: standard thinking
-                _ => &prompts.thinking_suffix_extended,         // Tier 3+: extended thinking
+                _ => &prompts.thinking_suffix_extended,     // Tier 3+: extended thinking
             }
         }
         _ => "",
@@ -371,7 +371,9 @@ mod tests {
                 role: MessageRole::User,
                 content: MessageContent::Blocks(vec![ContentBlock::ToolResult {
                     tool_use_id: "toolu_001".to_string(),
-                    content: ToolResultContent::Text(r#"{"temp": 22, "condition": "sunny"}"#.to_string()),
+                    content: ToolResultContent::Text(
+                        r#"{"temp": 22, "condition": "sunny"}"#.to_string(),
+                    ),
                     is_error: false,
                 }]),
             },
@@ -395,8 +397,13 @@ mod tests {
         assert!(function_results_start > function_calls_end);
 
         // The text between should only be whitespace/newlines
-        let between = &prompt[function_calls_end + "</ai00:function_calls>".len()..function_results_start];
-        assert!(between.trim().is_empty(), "Expected only whitespace between function_calls and function_results, got: {:?}", between);
+        let between =
+            &prompt[function_calls_end + "</ai00:function_calls>".len()..function_results_start];
+        assert!(
+            between.trim().is_empty(),
+            "Expected only whitespace between function_calls and function_results, got: {:?}",
+            between
+        );
 
         // Continuation should be in the SAME assistant turn, not a new one
         // Count how many times <ai00:assistant> appears
@@ -405,8 +412,18 @@ mod tests {
 
         // Should have exactly 1 assistant turn (open at start of tool call, close after continuation)
         // Plus the final prefix for generation
-        assert_eq!(assistant_opens.len(), 2, "Expected 2 <ai00:assistant> (1 turn + 1 prefix), got {}", assistant_opens.len());
-        assert_eq!(assistant_closes.len(), 1, "Expected 1 </ai00:assistant>, got {}", assistant_closes.len());
+        assert_eq!(
+            assistant_opens.len(),
+            2,
+            "Expected 2 <ai00:assistant> (1 turn + 1 prefix), got {}",
+            assistant_opens.len()
+        );
+        assert_eq!(
+            assistant_closes.len(),
+            1,
+            "Expected 1 </ai00:assistant>, got {}",
+            assistant_closes.len()
+        );
 
         // The continuation text should be inside the assistant turn
         assert!(prompt.contains("It's 22°C and sunny in Tokyo!\n</ai00:assistant>"));
@@ -457,7 +474,10 @@ mod tests {
         // The text should appear before function_calls in the same turn
         let text_pos = prompt.find("I'll check that for you.").unwrap();
         let func_pos = prompt.find("<ai00:function_calls>").unwrap();
-        assert!(text_pos < func_pos, "Text should appear before function_calls");
+        assert!(
+            text_pos < func_pos,
+            "Text should appear before function_calls"
+        );
     }
 
     #[test]

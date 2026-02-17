@@ -24,9 +24,9 @@ pub struct ModelCapabilities {
 impl Default for ModelCapabilities {
     fn default() -> Self {
         Self {
-            tool_use: true,           // Supported via Hermes format
-            extended_thinking: true,  // Supported via <think> tags
-            vision: false,            // Not yet supported
+            tool_use: true,          // Supported via Hermes format
+            extended_thinking: true, // Supported via <think> tags
+            vision: false,           // Not yet supported
             max_context_tokens: 32768,
             max_output_tokens: 4096,
         }

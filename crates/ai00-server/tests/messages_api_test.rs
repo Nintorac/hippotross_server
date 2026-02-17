@@ -2,13 +2,13 @@
 
 mod common;
 
+use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
 use ai00_server::api::messages::{
     emit_error, generate_thinking_signature, generate_tool_system_prompt, validate_tool_name,
     ContentBlock, MessageContent, MessageParam, MessageRole, MessagesRequest, MessagesResponse,
     StopReason, StreamErrorEvent, ThinkingConfig, ThinkingExtractor, ThinkingStreamParser,
     ThinkingStreamState, Tool, ToolChoice, ToolChoiceSimple, ToolChoiceSpecific,
 };
-use ai00_server::api::error::{ApiErrorKind, ApiErrorResponse};
 use ai00_server::config::PromptsConfig;
 use rstest::rstest;
 use serde_json::json;
@@ -122,12 +122,18 @@ fn test_full_request_deserialization() {
 
     let request: MessagesRequest = serde_json::from_value(json).unwrap();
     assert_eq!(request.model, "rwkv-7-g1");
-    assert_eq!(request.system, Some("You are a helpful assistant.".to_string()));
+    assert_eq!(
+        request.system,
+        Some("You are a helpful assistant.".to_string())
+    );
     assert!(request.stream);
     assert_eq!(request.temperature, Some(0.7));
     assert_eq!(request.top_p, Some(0.9));
     assert_eq!(request.top_k, Some(40));
-    assert_eq!(request.stop_sequences, Some(vec!["\n\n".to_string(), "END".to_string()]));
+    assert_eq!(
+        request.stop_sequences,
+        Some(vec!["\n\n".to_string(), "END".to_string()])
+    );
 }
 
 // =============================================================================
@@ -140,11 +146,11 @@ fn test_full_request_deserialization() {
 #[case("search_web", true)]
 #[case("my-tool-name", true)]
 #[case("Tool_123", true)]
-#[case("a", true)]  // Minimum length 1
-#[case("", false)]  // Empty not allowed
-#[case("tool name", false)]  // Spaces not allowed
-#[case("tool.name", false)]  // Dots not allowed
-#[case("tool@name", false)]  // Special chars not allowed
+#[case("a", true)] // Minimum length 1
+#[case("", false)] // Empty not allowed
+#[case("tool name", false)] // Spaces not allowed
+#[case("tool.name", false)] // Dots not allowed
+#[case("tool@name", false)] // Special chars not allowed
 fn test_tool_name_validation(#[case] name: &str, #[case] expected: bool) {
     assert_eq!(validate_tool_name(name), expected, "Failed for: {}", name);
 }
@@ -154,11 +160,17 @@ fn test_tool_name_validation(#[case] name: &str, #[case] expected: bool) {
 fn test_tool_name_length_limits() {
     // 64 chars - should be valid (max length)
     let max_valid = "a".repeat(64);
-    assert!(validate_tool_name(&max_valid), "64-char name should be valid");
+    assert!(
+        validate_tool_name(&max_valid),
+        "64-char name should be valid"
+    );
 
     // 65 chars - should be invalid (too long)
     let too_long = "a".repeat(65);
-    assert!(!validate_tool_name(&too_long), "65-char name should be invalid");
+    assert!(
+        !validate_tool_name(&too_long),
+        "65-char name should be invalid"
+    );
 }
 
 /// Test Tool struct deserialization.
@@ -181,7 +193,10 @@ fn test_tool_deserialization() {
 
     let tool: Tool = serde_json::from_value(json).unwrap();
     assert_eq!(tool.name, "get_weather");
-    assert_eq!(tool.description, Some("Get the current weather for a location".to_string()));
+    assert_eq!(
+        tool.description,
+        Some("Get the current weather for a location".to_string())
+    );
     assert!(tool.input_schema.is_object());
     assert!(tool.validate().is_ok());
 }
@@ -222,7 +237,10 @@ fn test_tool_validation() {
 #[case("auto", ToolChoiceSimple::Auto)]
 #[case("none", ToolChoiceSimple::None)]
 #[case("any", ToolChoiceSimple::Any)]
-fn test_tool_choice_simple_deserialization(#[case] input: &str, #[case] expected: ToolChoiceSimple) {
+fn test_tool_choice_simple_deserialization(
+    #[case] input: &str,
+    #[case] expected: ToolChoiceSimple,
+) {
     let json = json!(input);
     let choice: ToolChoice = serde_json::from_value(json).unwrap();
     match choice {
@@ -417,7 +435,10 @@ fn test_prompts_config_defaults() {
 
     // Check assistant prefix defaults (ai00 XML format)
     assert_eq!(config.assistant_prefix, "<ai00:assistant>\n");
-    assert_eq!(config.assistant_prefix_thinking, "<ai00:assistant>\n<think>\n");
+    assert_eq!(
+        config.assistant_prefix_thinking,
+        "<ai00:assistant>\n<think>\n"
+    );
 
     // Check thinking suffix defaults
     assert_eq!(config.thinking_suffix_short, " think a bit");
@@ -863,7 +884,10 @@ fn test_thinking_content_block_deserialization() {
 
     let block: ContentBlock = serde_json::from_value(json).unwrap();
     match block {
-        ContentBlock::Thinking { thinking, signature } => {
+        ContentBlock::Thinking {
+            thinking,
+            signature,
+        } => {
             assert_eq!(thinking, "Step 1: analyze the problem...");
             assert_eq!(signature, "sig_1234567890abcdef");
         }
@@ -1044,7 +1068,11 @@ fn test_stream_error_event_with_partial() {
         text: "Partial response before error...".to_string(),
     }];
 
-    let _event = emit_error("overloaded_error", "Server overloaded", Some(partial.clone()));
+    let _event = emit_error(
+        "overloaded_error",
+        "Server overloaded",
+        Some(partial.clone()),
+    );
 
     // Verify StreamErrorEvent serialization
     let error_data = StreamErrorEvent {
@@ -1240,7 +1268,10 @@ fn test_bnf_validation_request_deserialization() {
         "bnf_validation": "schema_aware"
     });
     let request: MessagesRequest = serde_json::from_value(json).unwrap();
-    assert_eq!(request.bnf_validation, Some(BnfValidationLevel::SchemaAware));
+    assert_eq!(
+        request.bnf_validation,
+        Some(BnfValidationLevel::SchemaAware)
+    );
 }
 
 /// Test bnf_validation is optional (None when not provided).
@@ -1354,8 +1385,20 @@ fn test_integration_structural_all_params_same_grammar() {
     // All combinations should produce identical grammar
     let g1 = generate_bnf_schema(None, false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
     let g2 = generate_bnf_schema(None, true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
-    let g3 = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
-    let g4 = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+    let g3 = generate_bnf_schema(
+        Some(&tools),
+        false,
+        BnfValidationLevel::Structural,
+        &stop_seqs,
+    )
+    .unwrap();
+    let g4 = generate_bnf_schema(
+        Some(&tools),
+        true,
+        BnfValidationLevel::Structural,
+        &stop_seqs,
+    )
+    .unwrap();
 
     assert_eq!(g1, g2, "thinking param should not affect unified grammar");
     assert_eq!(g2, g3, "tools param should not affect unified grammar");
@@ -1383,7 +1426,12 @@ fn test_integration_schema_aware_with_tools() {
     }];
     let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
+    let result = generate_bnf_schema(
+        Some(&tools),
+        false,
+        BnfValidationLevel::SchemaAware,
+        &stop_seqs,
+    );
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1426,7 +1474,12 @@ fn test_integration_schema_aware_multiple_tools() {
     ];
     let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
+    let result = generate_bnf_schema(
+        Some(&tools),
+        false,
+        BnfValidationLevel::SchemaAware,
+        &stop_seqs,
+    );
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1448,7 +1501,12 @@ fn test_integration_schema_aware_always_has_thinking() {
     let stop_seqs = vec!["\n\n".to_string()];
 
     // Even with thinking=false, unified grammar includes thinking
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
+    let result = generate_bnf_schema(
+        Some(&tools),
+        false,
+        BnfValidationLevel::SchemaAware,
+        &stop_seqs,
+    );
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1472,7 +1530,7 @@ fn test_integration_grammar_constants_structure() {
     // Unified grammar constant
     assert!(GRAMMAR_UNIFIED.contains("::="));
     assert!(GRAMMAR_UNIFIED.contains("<think>"));
-    assert!(GRAMMAR_UNIFIED.contains("<ai00:function_calls>"));  // ai00 XML format
+    assert!(GRAMMAR_UNIFIED.contains("<ai00:function_calls>")); // ai00 XML format
     assert!(GRAMMAR_UNIFIED.contains("#ex'")); // Complement regex
 }
 
@@ -1486,15 +1544,40 @@ fn test_integration_build_structural_grammar() {
         let grammar = build_structural_grammar(thinking, tools, &stop_seqs);
 
         // Unified grammar always has start rule
-        assert!(grammar.contains("start::="), "Missing start for ({}, {})", thinking, tools);
-        assert!(grammar.contains("json_object"), "Missing json_object for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("start::="),
+            "Missing start for ({}, {})",
+            thinking,
+            tools
+        );
+        assert!(
+            grammar.contains("json_object"),
+            "Missing json_object for ({}, {})",
+            thinking,
+            tools
+        );
 
         // Unified grammar always has both (both are optional in the grammar)
-        assert!(grammar.contains("<think>"), "Missing <think> for ({}, {})", thinking, tools);
-        assert!(grammar.contains("<ai00:function_calls>"), "Missing <ai00:function_calls> for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("<think>"),
+            "Missing <think> for ({}, {})",
+            thinking,
+            tools
+        );
+        assert!(
+            grammar.contains("<ai00:function_calls>"),
+            "Missing <ai00:function_calls> for ({}, {})",
+            thinking,
+            tools
+        );
 
         // Should have terminator
-        assert!(grammar.contains("terminator::="), "Missing terminator for ({}, {})", thinking, tools);
+        assert!(
+            grammar.contains("terminator::="),
+            "Missing terminator for ({}, {})",
+            thinking,
+            tools
+        );
     }
 }
 
@@ -1524,7 +1607,12 @@ fn test_integration_schema_aware_nested_schema() {
     }];
     let stop_seqs = vec!["\n\n".to_string()];
 
-    let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
+    let result = generate_bnf_schema(
+        Some(&tools),
+        false,
+        BnfValidationLevel::SchemaAware,
+        &stop_seqs,
+    );
     assert!(result.is_some());
 
     let grammar = result.unwrap();
@@ -1548,7 +1636,7 @@ fn test_integration_schema_aware_no_tools_fallback() {
     let grammar = result.unwrap();
     // Unified grammar always has both
     assert!(grammar.contains("<think>"));
-    assert!(grammar.contains("<ai00:function_calls>"));  // ai00 XML format
+    assert!(grammar.contains("<ai00:function_calls>")); // ai00 XML format
 
     // No tools, no thinking - still returns unified grammar
     let result = generate_bnf_schema(None, false, BnfValidationLevel::SchemaAware, &stop_seqs);
@@ -1719,10 +1807,7 @@ fn simulate_respond_one_tool_parsing(text: &str, has_tools: bool) -> Vec<Content
         let mut content_blocks: Vec<ContentBlock> = Vec::new();
 
         // Add text content if any
-        let text_content = result
-            .text
-            .unwrap_or_default()
-            + &final_result.text.unwrap_or_default();
+        let text_content = result.text.unwrap_or_default() + &final_result.text.unwrap_or_default();
         let trimmed_text = text_content.trim();
         if !trimmed_text.is_empty() {
             content_blocks.push(ContentBlock::Text {
@@ -1766,7 +1851,10 @@ fn test_handler_tool_parsing_simple() {
     // First block should be text
     match &blocks[0] {
         ContentBlock::Text { text } => {
-            assert!(text.contains("check the weather"), "Text should contain message");
+            assert!(
+                text.contains("check the weather"),
+                "Text should contain message"
+            );
         }
         _ => panic!("First block should be text"),
     }
@@ -1795,7 +1883,10 @@ fn test_handler_tool_parsing_disabled() {
     assert_eq!(blocks.len(), 1, "Should have only text block");
     match &blocks[0] {
         ContentBlock::Text { text } => {
-            assert!(text.contains("<tool_call>"), "Raw text should contain tool_call tag");
+            assert!(
+                text.contains("<tool_call>"),
+                "Raw text should contain tool_call tag"
+            );
         }
         _ => panic!("Should be text block"),
     }
@@ -1847,7 +1938,8 @@ fn test_handler_tool_parsing_no_text() {
 /// Test handler tool parsing with compact JSON (no newlines in JSON).
 #[test]
 fn test_handler_tool_parsing_compact_json() {
-    let model_output = r#"<tool_call>{"name": "get_weather", "arguments": {"location": "NYC"}}</tool_call>"#;
+    let model_output =
+        r#"<tool_call>{"name": "get_weather", "arguments": {"location": "NYC"}}</tool_call>"#;
 
     let blocks = simulate_respond_one_tool_parsing(model_output, true);
 
@@ -1915,7 +2007,9 @@ Here are the results."#;
     assert!(blocks.len() >= 1, "Should have at least tool_use block");
 
     // Find the tool_use block
-    let tool_use = blocks.iter().find(|b| matches!(b, ContentBlock::ToolUse { .. }));
+    let tool_use = blocks
+        .iter()
+        .find(|b| matches!(b, ContentBlock::ToolUse { .. }));
     assert!(tool_use.is_some(), "Should have tool_use block");
 }
 
@@ -1955,7 +2049,10 @@ fn test_tool_parser_streaming_simulation() {
 
     assert_eq!(all_tools.len(), 1, "Should have parsed one tool");
     assert_eq!(all_tools[0].name, "get_weather");
-    assert!(all_text.contains("Let me check"), "Should have text content");
+    assert!(
+        all_text.contains("Let me check"),
+        "Should have text content"
+    );
 }
 
 /// Test response JSON structure matches Claude API format.
@@ -2010,7 +2107,11 @@ fn test_tool_parser_input_vs_arguments() {
 
     let result = parser.feed(with_arguments);
     let final_result = parser.finalize();
-    let tools: Vec<_> = result.tool_uses.into_iter().chain(final_result.tool_uses).collect();
+    let tools: Vec<_> = result
+        .tool_uses
+        .into_iter()
+        .chain(final_result.tool_uses)
+        .collect();
 
     assert_eq!(tools.len(), 1, "Should parse with 'arguments' field");
     assert_eq!(tools[0].input["location"], "NYC");
@@ -2029,12 +2130,19 @@ fn test_tool_use_tags_not_parsed() {
 
     let result = parser.feed(with_tool_use);
     let final_result = parser.finalize();
-    let tools: Vec<_> = result.tool_uses.into_iter().chain(final_result.tool_uses).collect();
+    let tools: Vec<_> = result
+        .tool_uses
+        .into_iter()
+        .chain(final_result.tool_uses)
+        .collect();
 
     // Should NOT parse - we only support <tool_call>
     assert_eq!(tools.len(), 0, "Should NOT parse <tool_use> tags");
 
     // The <tool_use> content should be in the text output
     let text = result.text.unwrap_or_default() + &final_result.text.unwrap_or_default();
-    assert!(text.contains("<tool_use>"), "tool_use should appear in text");
+    assert!(
+        text.contains("<tool_use>"),
+        "tool_use should appear in text"
+    );
 }

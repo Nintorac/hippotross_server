@@ -155,15 +155,14 @@ fn to_generate_request(
 fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
     // Validate model is provided
     if req.model.is_empty() {
-        return Err(
-            ApiErrorResponse::invalid_request("model is required")
-                .with_param("model"),
-        );
+        return Err(ApiErrorResponse::invalid_request("model is required").with_param("model"));
     }
 
     // Validate messages array
     if req.messages.is_empty() {
-        return Err(ApiErrorResponse::invalid_request("messages cannot be empty"));
+        return Err(ApiErrorResponse::invalid_request(
+            "messages cannot be empty",
+        ));
     }
 
     // First message must be from user (Claude API requirement)
@@ -185,10 +184,10 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
     // Validate temperature range
     if let Some(temp) = req.temperature {
         if !(0.0..=2.0).contains(&temp) {
-            return Err(
-                ApiErrorResponse::invalid_request("temperature must be between 0.0 and 2.0")
-                    .with_param("temperature"),
-            );
+            return Err(ApiErrorResponse::invalid_request(
+                "temperature must be between 0.0 and 2.0",
+            )
+            .with_param("temperature"));
         }
     }
 
@@ -215,17 +214,17 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
     // Validate stop_sequences if provided
     if let Some(ref stop_seqs) = req.stop_sequences {
         if stop_seqs.len() > 8 {
-            return Err(
-                ApiErrorResponse::invalid_request("stop_sequences cannot have more than 8 items")
-                    .with_param("stop_sequences"),
-            );
+            return Err(ApiErrorResponse::invalid_request(
+                "stop_sequences cannot have more than 8 items",
+            )
+            .with_param("stop_sequences"));
         }
         for (i, seq) in stop_seqs.iter().enumerate() {
             if seq.is_empty() {
-                return Err(
-                    ApiErrorResponse::invalid_request("stop_sequences cannot contain empty strings")
-                        .with_param(format!("stop_sequences.{}", i)),
-                );
+                return Err(ApiErrorResponse::invalid_request(
+                    "stop_sequences cannot contain empty strings",
+                )
+                .with_param(format!("stop_sequences.{}", i)));
             }
         }
     }
@@ -233,9 +232,7 @@ fn validate_request(req: &MessagesRequest) -> Result<(), ApiErrorResponse> {
     // Validate thinking configuration if provided
     if let Some(ref thinking) = req.thinking {
         if let Err(msg) = thinking.validate(req.max_tokens) {
-            return Err(
-                ApiErrorResponse::invalid_request(msg).with_param("thinking.budget_tokens"),
-            );
+            return Err(ApiErrorResponse::invalid_request(msg).with_param("thinking.budget_tokens"));
         }
     }
 
@@ -289,8 +286,16 @@ async fn respond_one(
     let prompts = &config.prompts;
 
     // Populate request context with request metadata
-    let has_tools = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
-    let has_thinking = request.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
+    let has_tools = request
+        .tools
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+    let has_thinking = request
+        .thinking
+        .as_ref()
+        .map(|t| t.is_enabled())
+        .unwrap_or(false);
     ctx.model = request.model.clone();
     ctx.stream = false;
     ctx.max_tokens = request.max_tokens;
@@ -356,7 +361,10 @@ async fn respond_one(
 
         let thinking_block = result.thinking.map(|thinking| {
             let signature = generate_thinking_signature(&thinking);
-            ContentBlock::Thinking { thinking, signature }
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+            }
         });
 
         (thinking_block, result.response)
@@ -378,10 +386,7 @@ async fn respond_one(
         }
 
         // Add text content if any
-        let text_content = result
-            .text
-            .unwrap_or_default()
-            + &final_result.text.unwrap_or_default();
+        let text_content = result.text.unwrap_or_default() + &final_result.text.unwrap_or_default();
         let trimmed_text = text_content.trim();
         if !trimmed_text.is_empty() {
             content_blocks.push(ContentBlock::Text {
@@ -437,8 +442,8 @@ async fn respond_one(
     // Emit canonical log line
     ctx.emit_canonical_log();
 
-    let response =
-        MessagesResponse::new(model_name, content, token_counter.into()).with_stop_reason(stop_reason);
+    let response = MessagesResponse::new(model_name, content, token_counter.into())
+        .with_stop_reason(stop_reason);
 
     res.render(Json(response));
     Ok(())
@@ -456,8 +461,16 @@ async fn respond_stream(depot: &mut Depot, request: MessagesRequest, res: &mut R
     let prompts = &config.prompts;
 
     // Populate request context with request metadata
-    let has_tools_early = request.tools.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
-    let has_thinking_early = request.thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
+    let has_tools_early = request
+        .tools
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+    let has_thinking_early = request
+        .thinking
+        .as_ref()
+        .map(|t| t.is_enabled())
+        .unwrap_or(false);
     ctx.model = request.model.clone();
     ctx.stream = true;
     ctx.max_tokens = request.max_tokens;
@@ -575,42 +588,41 @@ async fn respond_stream_simple(
     let mut output_tokens = 0usize;
     let mut start_token = true;
 
-    let stream =
-        token_receiver
-            .into_stream()
-            .map(move |token| -> Result<SseEvent, std::convert::Infallible> {
-                match token {
-                    Token::Start => Ok(emit_message_start(
-                        message_id.clone(),
-                        model_name.clone(),
-                        input_tokens,
-                    )),
-                    Token::Content(text) => {
-                        output_tokens += 1;
+    let stream = token_receiver.into_stream().map(
+        move |token| -> Result<SseEvent, std::convert::Infallible> {
+            match token {
+                Token::Start => Ok(emit_message_start(
+                    message_id.clone(),
+                    model_name.clone(),
+                    input_tokens,
+                )),
+                Token::Content(text) => {
+                    output_tokens += 1;
 
-                        if start_token {
-                            start_token = false;
-                            let trimmed = text.trim_start().to_string();
-                            if trimmed.is_empty() {
-                                return Ok(emit_content_block_start_text(0));
-                            }
-                            return Ok(emit_text_delta(0, trimmed));
+                    if start_token {
+                        start_token = false;
+                        let trimmed = text.trim_start().to_string();
+                        if trimmed.is_empty() {
+                            return Ok(emit_content_block_start_text(0));
                         }
+                        return Ok(emit_text_delta(0, trimmed));
+                    }
 
-                        if text.is_empty() {
-                            Ok(emit_ping())
-                        } else {
-                            Ok(emit_text_delta(0, text))
-                        }
+                    if text.is_empty() {
+                        Ok(emit_ping())
+                    } else {
+                        Ok(emit_text_delta(0, text))
                     }
-                    Token::Stop(reason, _counter) => {
-                        let stop_reason: StopReason = reason.into();
-                        Ok(emit_message_delta(stop_reason, output_tokens))
-                    }
-                    Token::Done => Ok(emit_message_stop()),
-                    _ => Ok(emit_ping()),
                 }
-            });
+                Token::Stop(reason, _counter) => {
+                    let stop_reason: StopReason = reason.into();
+                    Ok(emit_message_delta(stop_reason, output_tokens))
+                }
+                Token::Done => Ok(emit_message_stop()),
+                _ => Ok(emit_ping()),
+            }
+        },
+    );
 
     salvo::sse::stream(res, stream);
 }
@@ -731,7 +743,9 @@ async fn respond_stream_with_optional_thinking(
             Token::Stop(reason, counter) => {
                 // Emit canonical log with actual metrics
                 let finish_reason: StopReason = reason.into();
-                state.log_ctx.emit_with_counter(&counter, &format!("{:?}", finish_reason));
+                state
+                    .log_ctx
+                    .emit_with_counter(&counter, &format!("{:?}", finish_reason));
 
                 // Finalize parser
                 let final_result = state.parser.finalize();
@@ -885,7 +899,9 @@ async fn respond_stream_with_thinking(
             Token::Stop(reason, counter) => {
                 // Emit canonical log with actual metrics
                 let finish_reason: StopReason = reason.into();
-                state.log_ctx.emit_with_counter(&counter, &format!("{:?}", finish_reason));
+                state
+                    .log_ctx
+                    .emit_with_counter(&counter, &format!("{:?}", finish_reason));
 
                 // Finalize parser
                 let final_result = state.parser.finalize();
@@ -1002,15 +1018,11 @@ async fn respond_stream_with_tools(
                     if !text_content.is_empty() {
                         // Start text block if needed
                         if !state.text_block_started {
-                            events.push(Ok(emit_content_block_start_text(
-                                state.content_block_index,
-                            )));
+                            events
+                                .push(Ok(emit_content_block_start_text(state.content_block_index)));
                             state.text_block_started = true;
                         }
-                        events.push(Ok(emit_text_delta(
-                            state.content_block_index,
-                            text_content,
-                        )));
+                        events.push(Ok(emit_text_delta(state.content_block_index, text_content)));
                     }
                 }
 
@@ -1051,7 +1063,9 @@ async fn respond_stream_with_tools(
                 };
 
                 // Emit canonical log with actual metrics
-                state.log_ctx.emit_with_counter(&counter, &format!("{:?}", stop_reason));
+                state
+                    .log_ctx
+                    .emit_with_counter(&counter, &format!("{:?}", stop_reason));
 
                 // Finalize parser
                 let final_result = state.parser.finalize();
@@ -1060,15 +1074,11 @@ async fn respond_stream_with_tools(
                 if let Some(text_content) = final_result.text {
                     if !text_content.is_empty() {
                         if !state.text_block_started {
-                            events.push(Ok(emit_content_block_start_text(
-                                state.content_block_index,
-                            )));
+                            events
+                                .push(Ok(emit_content_block_start_text(state.content_block_index)));
                             state.text_block_started = true;
                         }
-                        events.push(Ok(emit_text_delta(
-                            state.content_block_index,
-                            text_content,
-                        )));
+                        events.push(Ok(emit_text_delta(state.content_block_index, text_content)));
                     }
                 }
 
@@ -1150,4 +1160,3 @@ pub async fn messages_handler(
         }
     }
 }
-

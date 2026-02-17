@@ -144,10 +144,7 @@ fn handle_object(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) ->
         json_schema_to_kbnf(prop_schema, &value_rule, ctx);
 
         let comma = if i > 0 { "',' ws " } else { "" };
-        property_parts.push(format!(
-            "{}'\"{}\"' ws ':' ws {}",
-            comma, key, value_rule
-        ));
+        property_parts.push(format!("{}'\"{}\"' ws ':' ws {}", comma, key, value_rule));
     }
 
     // Optional properties (wrapped in (...)?)
@@ -169,10 +166,7 @@ fn handle_object(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) ->
 
     // Build the object rule
     let members = property_parts.join(" ws ");
-    ctx.add_rule(format!(
-        "{}::='{{' ws {} ws '}}';",
-        rule_name, members
-    ));
+    ctx.add_rule(format!("{}::='{{' ws {} ws '}}';", rule_name, members));
 
     rule_name.to_string()
 }
@@ -212,10 +206,7 @@ fn handle_array(schema: &Value, rule_name: &str, ctx: &mut GeneratorContext) -> 
             "{}::={} (',' ws {})*;",
             elements_rule, items_rule, items_rule
         ));
-        ctx.add_rule(format!(
-            "{}::='[' ws {}? ws ']';",
-            rule_name, elements_rule
-        ));
+        ctx.add_rule(format!("{}::='[' ws {}? ws ']';", rule_name, elements_rule));
     } else {
         // No items schema - allow any JSON array
         ctx.add_rule(format!("{}::=json_array;", rule_name));
@@ -260,10 +251,7 @@ pub fn generate_tool_name_grammar(tools: &[Tool]) -> String {
         return String::new();
     }
 
-    let names: Vec<String> = tools
-        .iter()
-        .map(|t| format!("'{}'", t.name))
-        .collect();
+    let names: Vec<String> = tools.iter().map(|t| format!("'{}'", t.name)).collect();
 
     format!("tool_name::={};", names.join(" | "))
 }
@@ -865,8 +853,13 @@ mod tests {
         let stop_seqs = vec!["\n\n".to_string()];
 
         // None level should always return None, regardless of tools/thinking
-        assert!(generate_bnf_schema(Some(&tools), false, BnfValidationLevel::None, &stop_seqs).is_none());
-        assert!(generate_bnf_schema(Some(&tools), true, BnfValidationLevel::None, &stop_seqs).is_none());
+        assert!(
+            generate_bnf_schema(Some(&tools), false, BnfValidationLevel::None, &stop_seqs)
+                .is_none()
+        );
+        assert!(
+            generate_bnf_schema(Some(&tools), true, BnfValidationLevel::None, &stop_seqs).is_none()
+        );
         assert!(generate_bnf_schema(None, true, BnfValidationLevel::None, &stop_seqs).is_none());
         assert!(generate_bnf_schema(None, false, BnfValidationLevel::None, &stop_seqs).is_none());
     }
@@ -896,10 +889,24 @@ mod tests {
         let stop_seqs = vec!["\n\n".to_string()];
 
         // All parameter combinations should produce the same unified grammar
-        let g1 = generate_bnf_schema(None, false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
-        let g2 = generate_bnf_schema(None, true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
-        let g3 = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
-        let g4 = generate_bnf_schema(Some(&tools), true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+        let g1 =
+            generate_bnf_schema(None, false, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+        let g2 =
+            generate_bnf_schema(None, true, BnfValidationLevel::Structural, &stop_seqs).unwrap();
+        let g3 = generate_bnf_schema(
+            Some(&tools),
+            false,
+            BnfValidationLevel::Structural,
+            &stop_seqs,
+        )
+        .unwrap();
+        let g4 = generate_bnf_schema(
+            Some(&tools),
+            true,
+            BnfValidationLevel::Structural,
+            &stop_seqs,
+        )
+        .unwrap();
 
         // All should be identical (unified grammar ignores params)
         assert_eq!(g1, g2);
@@ -923,7 +930,10 @@ mod tests {
         assert!(grammar.contains("<ai00:function_calls>"));
         // No tool-specific rules since no tools provided (check for pattern like "get_weather_call")
         // The grammar should not have tool-specific dispatch rules
-        assert!(!grammar.contains("_input"), "Should not have tool-specific input rules");
+        assert!(
+            !grammar.contains("_input"),
+            "Should not have tool-specific input rules"
+        );
     }
 
     #[test]
@@ -940,7 +950,12 @@ mod tests {
         )];
         let stop_seqs = vec!["\n\n".to_string()];
 
-        let result = generate_bnf_schema(Some(&tools), false, BnfValidationLevel::SchemaAware, &stop_seqs);
+        let result = generate_bnf_schema(
+            Some(&tools),
+            false,
+            BnfValidationLevel::SchemaAware,
+            &stop_seqs,
+        );
         assert!(result.is_some());
 
         let grammar = result.unwrap();

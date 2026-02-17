@@ -139,7 +139,10 @@ impl Writer for ApiErrorResponse {
 
 /// Implement Scribe for OpenAPI documentation.
 impl EndpointOutRegister for ApiErrorResponse {
-    fn register(_components: &mut salvo::oapi::Components, _operation: &mut salvo::oapi::Operation) {
+    fn register(
+        _components: &mut salvo::oapi::Components,
+        _operation: &mut salvo::oapi::Operation,
+    ) {
         // Error responses are documented via ToSchema
     }
 }
@@ -158,8 +161,7 @@ mod tests {
 
     #[test]
     fn test_error_with_param() {
-        let err = ApiErrorResponse::invalid_request("invalid value")
-            .with_param("temperature");
+        let err = ApiErrorResponse::invalid_request("invalid value").with_param("temperature");
         assert_eq!(err.error.param, Some("temperature".to_string()));
     }
 

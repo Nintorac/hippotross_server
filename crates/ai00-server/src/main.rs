@@ -22,9 +22,9 @@ use salvo::{
 };
 use tokio::{fs::File, signal};
 
-use ai00_server::{api, config, load_config, logging, types};
 #[cfg(feature = "embed")]
 use ai00_server::TextEmbed;
+use ai00_server::{api, config, load_config, logging, types};
 use types::JwtClaims;
 
 async fn load_web(path: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<()> {
@@ -115,7 +115,7 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() {
-    use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("warn,ai00_server=info,ai00_core=info,web_rwkv=info"));
