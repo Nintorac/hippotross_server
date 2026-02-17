@@ -59,16 +59,16 @@ pub struct ContentBlockDeltaEvent {
 #[serde(tag = "type")]
 pub enum ContentDelta {
     #[serde(rename = "text_delta")]
-    TextDelta { text: String },
+    Text { text: String },
 
     #[serde(rename = "thinking_delta")]
-    ThinkingDelta { thinking: String },
+    Thinking { thinking: String },
 
     #[serde(rename = "signature_delta")]
-    SignatureDelta { signature: String },
+    Signature { signature: String },
 
     #[serde(rename = "input_json_delta")]
-    InputJsonDelta { partial_json: String },
+    InputJson { partial_json: String },
 }
 
 /// content_block_stop event.
@@ -175,7 +175,7 @@ pub fn emit_text_delta(index: usize, text: String) -> SseEvent {
     let event = ContentBlockDeltaEvent {
         event_type: "content_block_delta",
         index,
-        delta: ContentDelta::TextDelta { text },
+        delta: ContentDelta::Text { text },
     };
     SseEvent::default()
         .name("content_block_delta")
@@ -187,7 +187,7 @@ pub fn emit_input_json_delta(index: usize, partial_json: String) -> SseEvent {
     let event = ContentBlockDeltaEvent {
         event_type: "content_block_delta",
         index,
-        delta: ContentDelta::InputJsonDelta { partial_json },
+        delta: ContentDelta::InputJson { partial_json },
     };
     SseEvent::default()
         .name("content_block_delta")
@@ -214,7 +214,7 @@ pub fn emit_thinking_delta(index: usize, thinking: String) -> SseEvent {
     let event = ContentBlockDeltaEvent {
         event_type: "content_block_delta",
         index,
-        delta: ContentDelta::ThinkingDelta { thinking },
+        delta: ContentDelta::Thinking { thinking },
     };
     SseEvent::default()
         .name("content_block_delta")
@@ -226,7 +226,7 @@ pub fn emit_signature_delta(index: usize, signature: String) -> SseEvent {
     let event = ContentBlockDeltaEvent {
         event_type: "content_block_delta",
         index,
-        delta: ContentDelta::SignatureDelta { signature },
+        delta: ContentDelta::Signature { signature },
     };
     SseEvent::default()
         .name("content_block_delta")

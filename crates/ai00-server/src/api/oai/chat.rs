@@ -67,21 +67,24 @@ impl From<&str> for Content {
     }
 }
 
-impl Content {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for Content {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Content::Text(s) => s.clone(),
-            Content::Parts(parts) => parts
-                .iter()
-                .filter_map(|p| {
-                    if p.r#type == "text" {
-                        p.text.clone()
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(""),
+            Content::Text(s) => write!(f, "{}", s),
+            Content::Parts(parts) => {
+                let text: String = parts
+                    .iter()
+                    .filter_map(|p| {
+                        if p.r#type == "text" {
+                            p.text.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                write!(f, "{}", text)
+            }
         }
     }
 }

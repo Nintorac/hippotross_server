@@ -150,15 +150,15 @@ impl MessageContent {
             MessageContent::Text(s) => s.clone(),
             MessageContent::Blocks(blocks) => blocks
                 .iter()
-                .filter_map(|b| match b {
-                    ContentBlock::Text { text } => Some(text.clone()),
+                .map(|b| match b {
+                    ContentBlock::Text { text } => text.clone(),
                     ContentBlock::Thinking { thinking, .. } => {
                         // Wrap thinking in <think> tags for training data format
-                        Some(format!("<think>{}</think>", thinking))
+                        format!("<think>{}</think>", thinking)
                     }
                     ContentBlock::ToolUse { name, input, .. } => {
                         // Format as ai00 function_calls for context in continued conversations
-                        Some(format_tool_use_as_ai00(name, input))
+                        format_tool_use_as_ai00(name, input)
                     }
                     ContentBlock::ToolResult {
                         tool_use_id,
@@ -166,7 +166,7 @@ impl MessageContent {
                         is_error,
                     } => {
                         // Format as ai00 function_results
-                        Some(format_tool_result_as_ai00(tool_use_id, content, *is_error))
+                        format_tool_result_as_ai00(tool_use_id, content, *is_error)
                     }
                 })
                 .collect::<Vec<_>>()

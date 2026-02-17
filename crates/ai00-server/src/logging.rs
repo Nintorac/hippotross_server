@@ -302,31 +302,34 @@ impl StreamLogContext {
 
 /// Inference batch events
 pub mod inference {
+    /// Data for a completed inference batch event.
+    pub struct BatchCompleteEvent<'a> {
+        pub request_id: &'a str,
+        pub trace_id: Option<&'a str>,
+        pub batch: usize,
+        pub prompt_token_count: usize,
+        pub cache_hit_tokens: usize,
+        pub output_token_count: usize,
+        pub prefill_ms: u64,
+        pub decode_ms: u64,
+        pub total_ms: u64,
+        pub finish_reason: &'a str,
+    }
+
     /// Emitted after each inference batch completes.
-    pub fn batch_complete(
-        request_id: &str,
-        trace_id: Option<&str>,
-        batch: usize,
-        prompt_token_count: usize,
-        cache_hit_tokens: usize,
-        output_token_count: usize,
-        prefill_ms: u64,
-        decode_ms: u64,
-        total_ms: u64,
-        finish_reason: &str,
-    ) {
+    pub fn batch_complete(event: &BatchCompleteEvent<'_>) {
         tracing::info!(
             event = "inference_batch",
-            request_id = %request_id,
-            trace_id = ?trace_id,
-            batch = batch,
-            prompt_token_count = prompt_token_count,
-            cache_hit_tokens = cache_hit_tokens,
-            output_token_count = output_token_count,
-            prefill_ms = prefill_ms,
-            decode_ms = decode_ms,
-            total_ms = total_ms,
-            finish_reason = %finish_reason,
+            request_id = %event.request_id,
+            trace_id = ?event.trace_id,
+            batch = event.batch,
+            prompt_token_count = event.prompt_token_count,
+            cache_hit_tokens = event.cache_hit_tokens,
+            output_token_count = event.output_token_count,
+            prefill_ms = event.prefill_ms,
+            decode_ms = event.decode_ms,
+            total_ms = event.total_ms,
+            finish_reason = %event.finish_reason,
             "Inference batch complete"
         );
     }
